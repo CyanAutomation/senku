@@ -226,9 +226,6 @@ async function readBoundedResponse(response: Response): Promise<unknown> {
       }
       chunks.push(item.value);
     }
-  } catch (error) {
-    if (error instanceof ProviderError) throw error;
-    throw error;
   } finally {
     reader.releaseLock();
   }
@@ -281,12 +278,7 @@ export async function requestOpenRouterDecision(
       await response.body?.cancel().catch(() => undefined);
       const retryable = response.status === 408 || response.status === 425
         || response.status === 429 || response.status >= 500;
-      throw new ProviderError(
-        response.status >= 400 && response.status < 500 && !retryable
-          ? "PROVIDER_UNAVAILABLE"
-          : "PROVIDER_UNAVAILABLE",
-        retryable,
-      );
+      throw new ProviderError("PROVIDER_UNAVAILABLE", retryable);
     }
     const contentType = response.headers.get("content-type");
     if (contentType && !/^\s*application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {

@@ -1,6 +1,6 @@
 import { authenticateBearer } from "./auth/bearer";
 import { ApiError, errorResponse } from "./api/errors";
-import { isRequestObject, validateDecisionRequest } from "./contracts/validation";
+import { validateDecisionRequest } from "./contracts/validation";
 import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
 import {
   DEFAULT_PROVIDER_TIMEOUT_MS,
