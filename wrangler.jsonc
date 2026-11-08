@@ -1,0 +1,15 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "senku",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-11-08",
+  "workers_dev": true,
+  "vars": {
+    "JEV_MODEL": "~typesafe/jev-latest",
+    "SENKU_PROVIDER_TIMEOUT_MS": "15000"
+  },
+  "limits": {
+    "cpu_ms": 10,
+    "subrequests": 1
+  }
+}
