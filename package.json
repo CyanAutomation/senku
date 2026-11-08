@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "perf:smoke": "vitest run test/performance.smoke.test.ts --reporter=verbose",
+    "smoke:provider": "vitest run --config vitest.provider-smoke.config.ts",
     "build": "wrangler deploy --dry-run --outdir dist",
     "deploy": "wrangler deploy"
   },
