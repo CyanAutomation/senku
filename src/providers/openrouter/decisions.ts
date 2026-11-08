@@ -19,7 +19,10 @@ export const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
 export const MIN_PROVIDER_TIMEOUT_MS = 1_000;
 export const MAX_PROVIDER_TIMEOUT_MS = 30_000;
 const MAX_API_KEY_BYTES = 4_096;
-const modelPattern = /^~?[a-z0-9][a-z0-9._/-]{0,199}$/i;
+const MAX_ANNOTATIONS = 32;
+const MAX_ANNOTATION_BYTES = 16 * 1024;
+const MAX_ANNOTATION_NODES = 2_048;
+const MAX_ANNOTATION_DEPTH = 16;
 
 export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE" | "INVALID_PROVIDER_RESPONSE";
 
@@ -36,16 +39,15 @@ export type ProviderConfig =
 
 export function resolveProviderConfig(env: Environment): ProviderConfig {
   const apiKey = env.OPENROUTER_API_KEY?.trim();
-  const modelValue = env.JEV_MODEL?.trim();
-  const model = modelValue || DEFAULT_JEV_MODEL;
+  const configuredModel = env.JEV_MODEL;
   const timeoutValue = env.SENKU_PROVIDER_TIMEOUT_MS?.trim();
   const timeoutMs = timeoutValue ? Number(timeoutValue) : DEFAULT_PROVIDER_TIMEOUT_MS;
   if (!apiKey || new TextEncoder().encode(apiKey).byteLength > MAX_API_KEY_BYTES
-    || model.length > 200 || !modelPattern.test(model)
+    || (configuredModel !== undefined && configuredModel !== DEFAULT_JEV_MODEL)
     || !Number.isInteger(timeoutMs) || timeoutMs < MIN_PROVIDER_TIMEOUT_MS || timeoutMs > MAX_PROVIDER_TIMEOUT_MS) {
     return { ok: false };
   }
-  return { ok: true, apiKey, model, timeoutMs };
+  return { ok: true, apiKey, model: DEFAULT_JEV_MODEL, timeoutMs };
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -77,8 +79,34 @@ function isExactDistribution(value: unknown, expectedKeys: string[]): value is R
 }
 
 function optionalConfidence(value: unknown): number | null | undefined {
-  if (value === undefined) return null;
+  if (value === undefined || value === null) return null;
   return isProbability(value) ? value : undefined;
+}
+
+function isBoundedAnnotationValue(value: unknown, depth: number, budget: { nodes: number }): boolean {
+  budget.nodes += 1;
+  if (budget.nodes > MAX_ANNOTATION_NODES || depth > MAX_ANNOTATION_DEPTH) return false;
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every((item) => isBoundedAnnotationValue(item, depth + 1, budget));
+  if (!isRecord(value)) return false;
+  return Object.values(value).every((item) => isBoundedAnnotationValue(item, depth + 1, budget));
+}
+
+function validAnnotations(value: unknown): boolean {
+  if (value === undefined) return true;
+  if (!Array.isArray(value) || value.length > MAX_ANNOTATIONS) return false;
+  const budget = { nodes: 0 };
+  if (!value.every((annotation) => isRecord(annotation)
+    && Object.keys(annotation).length > 0
+    && isBoundedAnnotationValue(annotation, 0, budget))) {
+    return false;
+  }
+  try {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength <= MAX_ANNOTATION_BYTES;
+  } catch {
+    return false;
+  }
 }
 
 function expectedScoreLegend(question: ScoreQuestion): Record<string, string> {
@@ -182,13 +210,14 @@ function validateProviderPayload(value: unknown, request: DecisionRequest): {
   usage?: ProviderUsage;
 } {
   if (!isRecord(value)
-    || !hasOnlyKeys(value, ["model", "answers", "usage", "id", "provider"])
+    || !hasOnlyKeys(value, ["model", "answers", "usage", "id", "provider", "annotations"])
     || typeof value.model !== "string" || value.model.trim().length === 0 || value.model.length > 200
     || !isRecord(value.answers)) {
     throw new ProviderError("INVALID_PROVIDER_RESPONSE", false);
   }
   if ((value.id !== undefined && (typeof value.id !== "string" || value.id.length > 256))
-    || (value.provider !== undefined && (typeof value.provider !== "string" || value.provider.length > 128))) {
+    || (value.provider !== undefined && (typeof value.provider !== "string" || value.provider.length > 128))
+    || !validAnnotations(value.annotations)) {
     throw new ProviderError("INVALID_PROVIDER_RESPONSE", false);
   }
 

@@ -6,7 +6,7 @@ import { soyuzRequest } from "./fixtures/soyuz-request";
 
 const env: Environment = {
   OPENROUTER_API_KEY: "test-openrouter-key",
-  SENKU_KASEKI_API_TOKEN: "test-client-token",
+  SENKU_KASEKI_API_TOKEN: "test-client-token-0123456789abcdef",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
@@ -69,7 +69,7 @@ describe("Worker routes and decision orchestration", () => {
       return providerResponse(JSON.parse(String(init?.body)) as DecisionRequest);
     });
     const response = await createTestWorker(fetchImpl).fetch(
-      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token", contentType: "application/json" }),
+      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }),
       env,
     );
     const body = await response.json() as Record<string, unknown>;
@@ -86,7 +86,7 @@ describe("Worker routes and decision orchestration", () => {
   it("accepts both sanitized Kaseki and Soyuz input fixtures without changing their meaning", async () => {
     for (const fixture of [kasekiRequest, soyuzRequest]) {
       const response = await createTestWorker(async (_input, init) => providerResponse(JSON.parse(String(init?.body)) as DecisionRequest))
-        .fetch(request(JSON.stringify(fixture), { authorization: "Bearer test-client-token", contentType: "application/json" }), env);
+        .fetch(request(JSON.stringify(fixture), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }), env);
       expect(response.status).toBe(200);
     }
   });
@@ -94,7 +94,7 @@ describe("Worker routes and decision orchestration", () => {
   it("rejects missing, malformed, and incorrect bearer tokens before calling the provider", async () => {
     const fetchImpl = vi.fn(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
     const worker = createTestWorker(fetchImpl);
-    for (const authorization of [undefined, "Basic abc", "Bearer", "Bearer wrong-token"]) {
+    for (const authorization of [undefined, "Basic abc", "Bearer", "Bearer wrong-token-0123456789abcdef"]) {
       const response = await worker.fetch(request(JSON.stringify(kasekiRequest), {
         authorization,
         contentType: "application/json",
@@ -108,7 +108,7 @@ describe("Worker routes and decision orchestration", () => {
   it("fails closed when the authentication secret is missing", async () => {
     const fetchImpl = vi.fn(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
     const response = await createTestWorker(fetchImpl).fetch(
-      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token", contentType: "application/json" }),
+      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }),
       { ...env, SENKU_KASEKI_API_TOKEN: undefined },
     );
     expect(response.status).toBe(503);
@@ -116,9 +116,23 @@ describe("Worker routes and decision orchestration", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
+  it("reports not ready for malformed machine-token configuration", async () => {
+    const fetchImpl = vi.fn(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
+    const worker = createTestWorker(fetchImpl);
+    for (const token of ["", "too-short", "test-client-token-0123456789abcdef ", "x".repeat(1_025)]) {
+      const response = await worker.fetch(
+        new Request("https://senku.test/readyz"),
+        { ...env, SENKU_KASEKI_API_TOKEN: token },
+      );
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({ status: "not_ready" });
+    }
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
   it("returns a safe not-configured error when provider credentials are absent", async () => {
     const response = await createTestWorker(async () => providerResponse(kasekiRequest as unknown as DecisionRequest)).fetch(
-      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token", contentType: "application/json" }),
+      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }),
       { ...env, OPENROUTER_API_KEY: undefined },
     );
     expect(response.status).toBe(503);
@@ -128,7 +142,7 @@ describe("Worker routes and decision orchestration", () => {
   it("rejects unsupported content types, invalid JSON, invalid schemas, and unsupported versions", async () => {
     const fetchImpl = vi.fn(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
     const worker = createTestWorker(fetchImpl);
-    const validAuth = { authorization: "Bearer test-client-token" };
+    const validAuth = { authorization: "Bearer test-client-token-0123456789abcdef" };
 
     expect((await worker.fetch(request("{}", { ...validAuth, contentType: "text/plain" }), env)).status).toBe(415);
     expect((await worker.fetch(request("{", { ...validAuth, contentType: "application/json" }), env)).status).toBe(400);
@@ -155,7 +169,7 @@ describe("Worker routes and decision orchestration", () => {
     expect(new TextEncoder().encode(exactBody).byteLength).toBe(LIMITS.requestBytes);
 
     const accepted = await worker.fetch(request(exactBody, {
-      authorization: "Bearer test-client-token",
+      authorization: "Bearer test-client-token-0123456789abcdef",
       contentType: "application/json",
     }), env);
     expect(accepted.status).toBe(200);
@@ -166,7 +180,7 @@ describe("Worker routes and decision orchestration", () => {
     });
     expect(new TextEncoder().encode(oversizedBody).byteLength).toBe(LIMITS.requestBytes + 1);
     const rejected = await worker.fetch(request(oversizedBody, {
-      authorization: "Bearer test-client-token",
+      authorization: "Bearer test-client-token-0123456789abcdef",
       contentType: "application/json",
     }), env);
     expect(rejected.status).toBe(413);
@@ -215,7 +229,7 @@ describe("Worker routes and decision orchestration", () => {
     const fetchImpl = vi.fn(async () => new Response(secretDetail, { status: 503 }));
     const logs: Array<Record<string, unknown>> = [];
     const response = await createTestWorker(fetchImpl, logs).fetch(
-      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token", contentType: "application/json" }),
+      request(JSON.stringify(kasekiRequest), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }),
       env,
     );
     expect(response.status).toBe(502);
@@ -239,14 +253,14 @@ describe("Worker routes and decision orchestration", () => {
       const sent = JSON.parse(String(init?.body)) as DecisionRequest;
       return providerResponse(sent);
     }, logs).fetch(
-      request(JSON.stringify(body), { authorization: "Bearer test-client-token", contentType: "application/json" }),
+      request(JSON.stringify(body), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }),
       env,
     );
     expect(response.status).toBe(200);
     const serializedLog = JSON.stringify(logs);
     expect(serializedLog).toContain("clientId");
     expect(serializedLog).not.toContain(stateMarker);
-    expect(serializedLog).not.toContain("test-client-token");
+    expect(serializedLog).not.toContain("test-client-token-0123456789abcdef");
     expect(serializedLog).not.toContain("test-openrouter-key");
     expect(serializedLog).not.toContain('"noul":0.75');
   });
