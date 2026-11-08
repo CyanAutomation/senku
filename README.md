@@ -2,16 +2,17 @@
 
 **A small, typed decision service for [Kaseki-Agent](https://github.com/CyanAutomation/kaseki-agent) and [Soyuz](https://github.com/CyanAutomation/soyuz).**
 
-Senku is a planned, independently deployable [Cloudflare Worker](https://developers.cloudflare.com/workers/) that provides bounded, evidence-based classifications and scores through [OpenRouter's Decisions API](https://openrouter.ai/) and JEV. It centralises decision-provider integration, validation, versioned decision profiles, cost controls, and operational telemetry while leaving execution and policy enforcement with its callers.
+Senku is an independently deployable [Cloudflare Worker](https://developers.cloudflare.com/workers/) that provides bounded, evidence-based classifications and scores through [OpenRouter's Decisions API](https://openrouter.ai/) and JEV. Phase 1 implements an authenticated generic decision endpoint, strict request and answer validation, and safe operational telemetry. It leaves execution and policy enforcement with its callers.
 
 - **Repository:** [CyanAutomation/senku](https://github.com/CyanAutomation/senku)
 - **Planned deployment:** [senku.scheimann.workers.dev](https://senku.scheimann.workers.dev)
 - **Runtime:** Cloudflare Workers, with the Workers Free plan as the initial operating target
 - **Language:** Native TypeScript, using Web APIs and minimal dependencies
+- **Local tooling:** Node.js 26 and npm
 - **Interfaces:** Versioned REST API, OpenAPI, and [UTCP](https://www.utcp.io/) discovery
 - **Decision provider:** JEV through OpenRouter's Decisions API (initial provider)
 
-> **Project status: design / pre-implementation.** This README defines the intended architecture and proposed v1 API, **not** a list of working features. Senku has not yet been deployed to the planned hostname. The contracts below may evolve during implementation.
+> **Project status: Phase 1 foundation implemented.** POST /v1/decisions, GET /healthz, and GET /readyz are implemented and tested locally. Senku has not been deployed to the planned hostname. Profiles, OpenAPI, UTCP, and consumer integrations remain planned.
 
 ## Why Senku?
 
@@ -55,14 +56,24 @@ flowchart TB
 | --- | --- |
 | **Kaseki-Agent** | Coding workflows, evidence collection, Pi execution, deterministic admission/safety policy, validation, retries, and publishing |
 | **Soyuz** | Authenticated control-plane operations, canonical run state, queues, dashboard, run-data projections, and user-facing access |
-| **Senku** | JEV connectivity, decision-profile registry, request/answer validation, bounded inference, provider metadata, and decision telemetry |
+| **Senku** | Phase 1: JEV connectivity, generic request/answer validation, bounded inference, provider metadata, and safe operational logs. Planned: decision profiles and profile permissions. |
 | **OpenRouter / JEV** | Typed model inference; Senku does not train or host its own JEV model |
 
 Soyuz is intended to call Senku through a **Cloudflare Service Binding**. Kaseki, running outside Cloudflare on Docker hosts, will call Senku using authenticated HTTPS. The same Senku application logic serves both paths.
 
-## Proposed API
+## Phase 1 API
 
-All paths below are **planned**. Examples use the intended deployment hostname, which is not yet live.
+| Method | Path | Purpose |
+| --- | --- | --- |
+| POST | /v1/decisions | Authenticated, bounded JEV questions for the configured internal client |
+| GET | /healthz | Liveness without calling OpenRouter |
+| GET | /readyz | Sanitised configuration readiness without a provider call |
+
+The decision endpoint currently authorises the Kaseki client secret only. Soyuz must not call the generic question endpoint until a separately authorised identity and its profile permissions are implemented.
+
+## Planned API
+
+The following profile and discovery paths are planned. Examples use the intended deployment hostname, which is not yet live.
 
 ### Profile-based decision endpoints
 
@@ -73,11 +84,8 @@ The preferred interface is a registry of explicit, versioned decision profiles:
 | `POST` | `/v1/profiles/{profileId}/evaluate` | Evaluate evidence against a registered decision profile |
 | `GET` | `/v1/profiles` | Discover permitted profiles and basic metadata |
 | `GET` | `/v1/profiles/{profileId}` | Read a profile's published input/output contract |
-| `POST` | `/v1/decisions` | Evaluate bounded dynamic questions; restricted to specifically authorised machine clients |
 | `GET` | `/openapi.json` | OpenAPI document for supported HTTP operations |
 | `GET` | `/utcp` | UTCP discovery manual for approved tool endpoints |
-| `GET` | `/healthz` | Liveness without calling OpenRouter |
-| `GET` | `/readyz` | Sanitised configuration readiness without a billable model call |
 
 **Proposed initial profiles**
 
@@ -151,13 +159,13 @@ The specific answer names, probabilities, token counts, and timings above are ex
 
 ### Generic decisions for trusted clients
 
-`POST /v1/decisions` will accept a bounded `state` and a typed `questions` map using the established JEV concepts:
+`POST /v1/decisions` accepts a bounded `state` and a typed `questions` map using the established JEV concepts:
 
 - `noul` — a binary/probabilistic assessment.
 - `choice` — selection from a fixed set of labelled outcomes with a probability distribution.
 - `score` — an ordinal score with a defined scale.
 
-This endpoint is for explicitly authorised, trusted workloads, **not** an open-ended public classifier. Caller-controlled instructions must never be allowed to bypass resource limits, privacy controls, or Kaseki/Soyuz policy. The request and response envelopes will retain sufficient metadata for backward-compatible adapters to the existing Kaseki `DecisionService` and Soyuz JEV clients.
+This endpoint is authenticated with the Kaseki machine token and is for trusted internal use, **not** an open-ended public classifier. Soyuz is not authorised in Phase 1. Requests are limited to 128 KiB and 64 questions; choice options and score levels are limited to 12 each. The server selects the model and makes one provider attempt. Caller-controlled instructions cannot bypass these limits or Kaseki's or Soyuz's local policies. The versioned response includes the provider model, validated answers, available usage, duration, and attempt count for future consumer adapters.
 
 ### Errors and compatibility
 
@@ -174,7 +182,7 @@ The v1 API will return consistent machine-readable failures, for example:
 }
 ```
 
-Planned categories include validation failures, unauthorised callers, forbidden profiles, payload-limit violations, provider timeouts, malformed model responses, and quota exhaustion. A provider failure is **not** an affirmative classification.
+Implemented categories include invalid requests, unauthorised callers, payload-limit violations, provider timeouts, unavailable providers, malformed model responses, and missing configuration. Profile-specific authorization and quota errors remain planned. A provider failure is **not** an affirmative classification.
 
 All requests and results will use explicitly versioned contracts. The service will reject unknown profiles and unsupported major schema versions rather than silently reinterpret them.
 
@@ -231,13 +239,13 @@ Senku handles potentially sensitive task text, validation output, and repository
 
 The initial design requires:
 
-- **Separate client identities:** distinct credentials and least-privilege profile allowances for Kaseki and Soyuz. A Service Binding is a private transport path, not a substitute for an explicit authorisation policy.
+- **Phase 1 identity:** one dedicated Kaseki bearer secret. Soyuz has no Senku identity or access in this phase. A future Service Binding is a private transport path, not a substitute for explicit authorisation.
 - **Credential isolation:** the OpenRouter API key is stored only as a Senku Worker secret; it is never returned to callers or placed in UTCP metadata.
 - **Local evidence minimisation:** callers redact and bound data before transmission; Senku validates and enforces its own hard limits. Redaction is not a complete secret scanner.
-- **Provider containment:** fixed provider destinations, allowed models, bounded timeouts and attempts, no arbitrary URL forwarding or caller-selected upstream credentials.
+- **Provider containment:** fixed provider destination, server-configured model, bounded timeout and one attempt, no arbitrary URL forwarding or caller-selected upstream credentials.
 - **Safe logging:** no raw task prompts, repository source, diffs, credential values, request bodies, or model answers in routine logs.
 - **Advisory output:** typed answers do not themselves authorise side effects or bypass local deterministic controls.
-- **Abuse and cost controls:** per-client quotas, profile permissions, maximum request/question sizes, bounded inference and explicit handling of retry amplification.
+- **Abuse and cost controls:** Phase 1 bounds request/question sizes and inference time and disables retries. Per-client quotas and profile permissions are future work.
 - **Strict response validation:** check expected answer keys, types, choice labels, probability ranges and score scales before returning a result.
 
 An unrestricted generic classifier is particularly sensitive. It must remain protected even if a publicly accessible UTCP discovery document exists.
@@ -246,7 +254,7 @@ An unrestricted generic classifier is particularly sensitive. It must remain pro
 
 Senku targets a small, stateless Cloudflare Worker deployable within the applicable [Workers Free limits](https://developers.cloudflare.com/workers/platform/limits/).
 
-The Worker should do little more than authenticate, validate a bounded JSON request, select a profile, make one external Decisions API call, validate its response, and return typed JSON. Waiting for the provider's network response is not CPU execution time, but local parsing and validation **do** consume CPU time.
+The Phase 1 Worker authenticates the caller, validates a bounded generic decision request, makes one external Decisions API call, validates the response, and returns typed JSON. Waiting for the provider's network response is not CPU execution time, but local parsing and validation **do** consume CPU time.
 
 Implementation choices:
 
@@ -254,14 +262,14 @@ Implementation choices:
 - No D1, KV, Queue, Durable Object, or persistent storage required for the initial service.
 - Bounded payloads and streamed/size-limited provider responses.
 - Default to a single provider attempt; any retries must be deliberate, bounded, and observable.
-- Request, provider, and token-usage counters without persisting sensitive evidence.
-- Measure CPU time and Free-tier compatibility against representative Kaseki and Soyuz inputs before production migration.
+- Structured request logs with available provider usage, without persisting sensitive evidence.
+- The local performance smoke test records elapsed time but not billed CPU. Measure Cloudflare CPU against representative payloads after a deployment is separately approved.
 
 The Free-plan allowance is shared with other applicable Workers on the account. **Free hosting is a design target, not a guarantee**; limits and prices can change. OpenRouter inference is independently billable, so budgets and usage reporting are required even when Cloudflare hosting costs remain zero.
 
 ## Development approach
 
-The project will use native TypeScript throughout. A prospective layout is:
+The project uses native TypeScript throughout. The Phase 1 layout is:
 
 ```text
 src/
@@ -269,32 +277,29 @@ src/
   api/                      # HTTP routes and error envelopes
   auth/                     # Caller identity and profile permissions
   contracts/                # Shared typed request and result schemas
-  decisions/                # Common decision engine
-  profiles/                 # Named/versioned question definitions
   providers/openrouter/     # JEV Decisions API adapter
-  utcp/                     # Discovery manual generation
   observability/            # Safe usage and execution metrics
-test/                       # Unit, contract, fixture, and Worker tests
+test/                       # Contract, provider, fixture, and Worker-runtime tests
+docs/                       # API contract, development, and implementation decisions
 wrangler.jsonc              # Worker deployment configuration
 ```
 
-This tree is **proposed**, not present yet. Build and deployment commands will be documented after the scaffold is implemented.
+API and development details are in [docs/CONTRACT.md](docs/CONTRACT.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), and [docs/PHASE-1-DECISIONS.md](docs/PHASE-1-DECISIONS.md).
 
 ### Testing requirements
 
 Before consumer migration, provide:
 
-1. Unit tests for typed questions and answers, profile dispatch, permissions, and errors.
+1. Runtime contract tests for typed questions and answers, authentication, routes, and errors.
 2. Mocked provider tests for timeout, malformed responses, oversized payloads, and unavailable credentials.
-3. Worker-runtime tests for the intended Free-plan CPU budget.
+3. Worker-runtime tests and a repeatable payload performance smoke test. These report local elapsed time, not Cloudflare billed CPU.
 4. Golden fixtures captured from sanitised Kaseki and Soyuz decision scenarios.
 5. Contract tests confirming compatibility with Kaseki's `DecisionService` and Soyuz's existing advisory result shapes.
-6. UTCP-manual validation and tests verifying that tools call the correct native REST paths.
-7. Tests ensuring model output never authorises a deterministic execution action.
+6. Tests ensuring model output never authorises a deterministic execution action.
 
 ## Roadmap
 
-- [ ] **Phase 1 — Foundation:** Worker scaffold, typed contracts, OpenRouter adapter, authentication, bounded requests, safe errors, and tests.
+- [x] **Phase 1 — Foundation:** Worker scaffold, typed contracts, OpenRouter adapter, authentication, bounded requests, safe errors, and tests.
 - [ ] **Phase 2 — Profiles:** Versioned profile registry, Kaseki and Soyuz baseline profiles, OpenAPI generation, usage instrumentation, and reference fixtures.
 - [ ] **Phase 3 — Soyuz integration:** Service Binding, compatible dashboard decision adapter, preserved profile semantics, and removal of duplicated provider code.
 - [ ] **Phase 4 — Kaseki integration:** Remote `DecisionService` adapter, staged migration, regression/evaluation comparisons, and documented local failure policies.
