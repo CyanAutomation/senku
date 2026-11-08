@@ -1,0 +1,4 @@
+OPENROUTER_API_KEY=replace-with-local-openrouter-api-key
+SENKU_KASEKI_API_TOKEN=replace-with-a-long-random-local-token
+JEV_MODEL=~typesafe/jev-latest
+SENKU_PROVIDER_TIMEOUT_MS=15000
