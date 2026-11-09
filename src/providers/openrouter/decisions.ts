@@ -284,7 +284,7 @@ export async function requestOpenRouterDecision(
     try {
       response = await fetchImpl(OPENROUTER_DECISIONS_URL, {
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
         headers: {
           authorization: "Bearer " + config.apiKey,
