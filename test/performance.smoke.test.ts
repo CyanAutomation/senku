@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { createWorker } from "../src/index";
 import { LIMITS, type DecisionRequest, type Environment } from "../src/contracts/decisions";
-import { evaluateProfile } from "../src/decisions/profile-engine";
 
 const environment: Environment = {
   OPENROUTER_API_KEY: "performance-test-key",
   SENKU_KASEKI_API_TOKEN: "performance-client-token-0123456789abcdef",
+  SENKU_SOYUZ_API_TOKEN: "performance-soyuz-token-0123456789abcdef",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
@@ -105,43 +105,94 @@ describe("bounded request performance smoke", () => {
     expect(results).toHaveLength(3);
   });
 
-  it("measures representative internal profile-evaluation workloads without live inference", async () => {
-    const profileInput = {
+  it("measures complete HTTP profile evaluations through mocked JEV at representative maximum inputs", async () => {
+    const maxTaskAdmissionInput = {
       repoUrl: "https://github.com/CyanAutomation/senku",
-      ref: "main",
-      taskPrompt: "Review this task evidence: " + "bounded operational evidence ".repeat(110),
-      validationCommands: ["npm run typecheck", "npm test"],
-      changedFilesAllowlist: ["src/**", "test/**"],
+      ref: "r".repeat(256),
+      taskPrompt: "t".repeat(9_000),
+      validationCommands: Array.from({ length: 14 }, () => "c".repeat(450)),
+      changedFilesAllowlist: Array.from({ length: 38 }, () => "f".repeat(410)),
       taskMode: "patch",
       publishMode: "pr",
-      startupCheck: false,
-      scouting: { enabled: true, timeoutSeconds: 120 },
-      goalSetting: { enabled: true, timeoutSeconds: 120 },
+      startupCheck: true,
+      scouting: { enabled: true, model: "s".repeat(255), timeoutSeconds: 10_800 },
+      goalSetting: { enabled: true, model: "g".repeat(255), timeoutSeconds: 10_800 },
     };
-    const fetchImpl: typeof fetch = async (_input, init) => mockedProviderResponse(JSON.parse(String(init?.body)) as DecisionRequest);
-    const results: Array<{ profileId: string; evidenceBytes: number; averageWallMs: number; maxWallMs: number }> = [];
-    const elapsed: number[] = [];
-    let evidenceBytes = 0;
-    for (let run = 0; run < 3; run += 1) {
-      const started = performance.now();
-      const result = await evaluateProfile("task_admission_v1", profileInput, { clientIdentity: "kaseki" }, {
-        env: environment,
-        fetchImpl,
+    const scenarios = [
+      { id: "run_operations_triage_v1", token: "performance-soyuz-token-0123456789abcdef", input: { run: {
+        status: "failed", stage: "s".repeat(128), operationalHealth: "suspect_stalled", failureClass: "f".repeat(128),
+        createdAt: "2026-11-08T12:00:00.000Z", queuedAt: "2026-11-08T12:00:01.000Z", startedAt: "2026-11-08T12:00:02.000Z",
+        completedAt: "2026-11-08T12:00:03.000Z", lastHeartbeatAt: "2026-11-08T12:00:02.500Z",
+      } } },
+      { id: "kaseki_output_review_v1", token: "performance-soyuz-token-0123456789abcdef", input: { canonicalRun: {
+        status: "failed", failureClass: "f".repeat(128), exitCode: -1, changedFileCount: 1_000_000,
+      }, summary: "s".repeat(2_000) } },
+      { id: "kaseki_output_review_v2", token: "performance-soyuz-token-0123456789abcdef", input: { canonicalRun: {
+        status: "failed", failureClass: "f".repeat(128), exitCode: 143, changedFileCount: 1_000_000,
+      }, summary: "s".repeat(2_000) } },
+      { id: "task_admission_v1", token: "performance-client-token-0123456789abcdef", input: maxTaskAdmissionInput },
+      { id: "validation_recovery_v1", token: "performance-client-token-0123456789abcdef", input: {
+        command: "npm test", exitCode: 1, output: "x".repeat(6_000),
+      } },
+    ];
+    const results: Array<{
+      profileId: string;
+      requestBytes: number;
+      evidenceBytes: number;
+      questionCount: number;
+      providerAttemptsPerRequest: number;
+      providerCalls: number;
+      averageWallMs: number;
+      maxWallMs: number;
+    }> = [];
+
+    for (const scenario of scenarios) {
+      const logs: Array<Record<string, unknown>> = [];
+      let providerCalls = 0;
+      const worker = createWorker({
+        fetchImpl: async (_input, init) => {
+          providerCalls += 1;
+          return mockedProviderResponse(JSON.parse(String(init?.body)) as DecisionRequest);
+        },
+        logger: (record) => logs.push(record as Record<string, unknown>),
       });
-      elapsed.push(performance.now() - started);
-      evidenceBytes = result.metadata.evidenceBytes;
+      const body = JSON.stringify({ schemaVersion: "1", input: scenario.input });
+      const requestBytes = new TextEncoder().encode(body).byteLength;
+      expect(requestBytes).toBeLessThanOrEqual(LIMITS.requestBytes);
+      const elapsed: number[] = [];
+      for (let run = 0; run < 3; run += 1) {
+        const started = performance.now();
+        const response = await worker.fetch(new Request(`https://senku.test/v1/profiles/${scenario.id}/evaluate`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${scenario.token}`, "content-type": "application/json" },
+          body,
+        }), environment);
+        expect(response.status).toBe(200);
+        const responseBody = await response.json() as { attemptCount: number };
+        expect(responseBody.attemptCount).toBe(1);
+        elapsed.push(performance.now() - started);
+      }
+      const lastLog = logs.at(-1)!;
+      results.push({
+        profileId: scenario.id,
+        requestBytes,
+        evidenceBytes: Number(lastLog.evidenceBytes),
+        questionCount: Number(lastLog.questionCount),
+        providerAttemptsPerRequest: Number(lastLog.attemptCount),
+        providerCalls,
+        averageWallMs: Number((elapsed.reduce((sum, value) => sum + value, 0) / elapsed.length).toFixed(2)),
+        maxWallMs: Number(Math.max(...elapsed).toFixed(2)),
+      });
+      expect(lastLog.event).toBe("profile.evaluation_completed");
+      expect(lastLog.attemptCount).toBe(1);
+      expect(providerCalls).toBe(3);
     }
-    results.push({
-      profileId: "task_admission_v1",
-      evidenceBytes,
-      averageWallMs: Number((elapsed.reduce((sum, value) => sum + value, 0) / elapsed.length).toFixed(2)),
-      maxWallMs: Number(Math.max(...elapsed).toFixed(2)),
-    });
+
     console.log(JSON.stringify({
-      benchmark: "local workerd profile wall-clock smoke; not billed CPU time",
+      benchmark: "local workerd full HTTP profile path; mocked provider; wall time is not billed CPU",
       results,
     }));
-    expect(results).toHaveLength(1);
-    expect(evidenceBytes).toBeLessThanOrEqual(32 * 1024);
+    expect(results).toHaveLength(5);
+    expect(results.find((item) => item.profileId === "task_admission_v1")!.evidenceBytes).toBeLessThanOrEqual(32 * 1024);
   });
 });

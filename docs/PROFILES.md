@@ -1,75 +1,77 @@
-# Internal decision profiles
+# Decision profile contracts
 
-## Status and purpose
+The profile engine exposes five server-owned, versioned contracts through `POST /v1/profiles/{profileId}/evaluate`. Callers send evidence inside `{ "schemaVersion": "1", "input": ... }`; Senku constructs the JEV questions and keeps provider calls, validation, and permissions centralized. `GET /v1/profiles` discovers only permitted profiles. `GET /v1/profiles/{profileId}` returns the permitted profile's machine-readable input/output schemas and limits. The authenticated `/openapi.json` document uses the same schemas.
 
-Phase 2A adds a typed, versioned profile engine that runs inside Senku. It does not add profile-specific HTTP routes or a public profile catalogue. The only implemented decision endpoint remains `POST /v1/decisions`.
+No profile accepts caller-supplied questions, criteria, provider URLs, or model names. No profile result authorises a task, retry, code change, publication, queue transition, or other side effect. Kaseki and Soyuz continue to enforce their own deterministic policies.
 
-A profile is a server-owned decision contract. It fixes an identifier and version, owning client, validated input projection, JEV question map, answer validation, and stricter evidence limit. Callers provide evidence only; they cannot supply or replace questions, criteria, model, or provider destination.
+## Profiles and limits
 
-The internal engine checks profile permission, validates and projects the evidence, checks the standard request limits, calls the shared OpenRouter adapter once, validates the profile answer map, and returns typed answers with operational metadata. It does not write decision history or log the evidence.
+| Profile ID | Owner | Evidence | Projected evidence limit | Questions |
+| --- | --- | --- | ---: | ---: |
+| `run_operations_triage_v1` | Soyuz | Run status, stage, operational health, failure class, lifecycle timestamps | 12 KiB | 3 |
+| `kaseki_output_review_v1` | Soyuz | Canonical run status, failure class, exit code, changed-file count, summary up to 2,000 characters | 8 KiB | 3 |
+| `kaseki_output_review_v2` | Soyuz | Same bounded evidence as v1 plus recorded-outcome scoring | 8 KiB | 4 |
+| `task_admission_v1` | Kaseki | Repository URL/ref, task prompt, validation commands, allowlist, task/publish modes, stage settings | 32 KiB | 6 |
+| `validation_recovery_v1` | Kaseki | Command, exit code, and bounded validation output | 8 KiB | 2 |
 
-## Registered profiles
+The request body cap is 128 KiB. Per-profile projected-evidence caps are checked again after validation and redaction, before provider invocation.
 
-| Profile ID | Version | Owner | Evidence and purpose |
-| --- | ---: | --- | --- |
-| `run_operations_triage_v1` | 1 | Soyuz | Run status, stage, operational health, failure class, and lifecycle timestamps. Returns follow-up probability, likely area, and urgency score. |
-| `kaseki_output_review_v1` | 1 | Soyuz | Canonical run status, failure class, exit code, changed-file count, and a summary of at most 2,000 characters. Returns specificity, status alignment, and evidence strength. |
-| `kaseki_output_review_v2` | 2 | Soyuz | The same bounded projection as v1, with the additional recorded-outcome score. It does not replace v1 automatically. |
-| `task_admission_v1` | 1 | Kaseki | Bounded Kaseki task request fields. Returns credential, permission, security-boundary, risk, task-type, and validation-focus classifications for advisory use. |
-| `validation_recovery_v1` | 1 | Kaseki | A command, exit code, and bounded validation output. Returns failure-cause and recommended-action classifications only. |
+## Input summaries
 
-The Soyuz question names, answer keys, choice labels, score scales, and recorded-summary projection match its current `src/jev/profiles.ts` and `src/jev/analysis.ts`. Soyuz remains responsible for authorising dashboard access and reading the run record before constructing the evidence projection. Senku receives no run UUID and performs no D1 lookup.
+The full machine-readable schema is returned under `inputSchema` from `GET /v1/profiles/{profileId}` and appears in the caller's `/openapi.json` document. All schemas reject undeclared object properties.
 
-The Kaseki answer keys and criteria match its current `buildTaskAdmissionRequest()` and `buildValidationRecoveryQuestions()` builders. Kaseki retains deterministic credential screening, admission, command allowlists, retry ceilings, and execution policy. The profiles do not admit or reject tasks, run commands, retry validations, edit files, or authorise publication.
+### `run_operations_triage_v1`
 
-`validation_recovery_v1` accepts a command of at most 1,000 UTF-8 bytes, an exit code from 0 through 255, and output of at most 6,000 UTF-8 bytes. Its provider projection retains at most the final 5,000 JavaScript UTF-16 code units of that output; the profile's 8 KiB aggregate evidence cap still applies.
+Requires one `run` object containing:
 
-## Input and output contracts
+- `status`: `admitting`, `queued`, `claimed`, `running`, `cancel_requested`, `cancelled`, `completed`, `failed`, or `admission_failed`.
+- `stage`: string up to 128 bytes or `null`.
+- `operationalHealth`: `unknown`, `healthy`, or `suspect_stalled`.
+- `failureClass`: string up to 128 bytes or `null`.
+- `createdAt`: required timestamp; `queuedAt`, `startedAt`, `completedAt`, and `lastHeartbeatAt`: timestamps or `null`.
 
-Each profile rejects unexpected top-level fields and validates its required fields, enums, types, numeric ranges, string sizes, nested settings, and aggregate evidence size. The task-admission input uses Kaseki's current task-mode values (`patch`, `inspect`) and publish-mode values (`auto`, `none`, `branch`, `pr`). Common credential patterns are redacted before Kaseki state is sent upstream; Kaseki's own deterministic screening remains authoritative.
+It returns `needs_followup` (NouL), `likely_area` (`execution`, `control_plane`, or `unknown`), and `severity` (0–2: Routine, Needs review, Urgent).
 
-Profile evidence limits are stricter than the generic 128 KiB request limit:
+### `kaseki_output_review_v1` and `kaseki_output_review_v2`
 
-| Profile | Maximum projected evidence |
-| --- | ---: |
-| `run_operations_triage_v1` | 12 KiB |
-| `kaseki_output_review_v1` | 8 KiB |
-| `kaseki_output_review_v2` | 8 KiB |
-| `task_admission_v1` | 32 KiB |
-| `validation_recovery_v1` | 8 KiB |
+Require `canonicalRun` with status, nullable failure class, nullable integer exit code, and nullable changed-file count, plus a required `summary` string or `null`. The summary is capped at 2,000 characters and 8,000 UTF-8 bytes. Changed-file count is bounded to 0–1,000,000.
 
-The shared provider validates exact answer keys and types, probability maps, confidence values, choice labels, score ranges, and score legends. Profile validation repeats the profile-specific key, type, choice-label, and score-range checks. The typed result keeps the canonical JEV answers, including probability distributions, confidence, and legends. Missing or explicitly null choice/score confidence is returned as `null`; NouL probabilities are normalised deterministically.
+Kaseki's scheduler uses `-1` when a process exit code is unavailable, and uses normal OS/signal-derived values such as `143` on termination. Soyuz's stored run row preserves the integer; its failed/cancelled callback schemas also accept integer exit codes. The bounded compatibility policy is therefore `-1..255`: it preserves the observed unknown sentinel, ordinary process codes, and common signal-derived statuses while rejecting other negatives and implausibly large values. Completed Soyuz callbacks still require zero.
 
-Results carry the resolved provider model and safe operational metadata: profile ID/version, client identity, question count, evidence size, provider duration, one attempt, and usage/cost fields when supplied. They do not contain annotation bodies or raw input evidence.
+V1 returns `summary_specificity`, `outcome_alignment`, and `evidence_strength`. V2 adds `recorded_outcome`. These IDs preserve the existing answer meanings and scales; V2 does not silently replace V1.
 
-## Ownership and permissions
+### `task_admission_v1`
 
-The central policy in `src/auth/permissions.ts` currently allows:
+Requires an HTTP or HTTPS `repoUrl` without URL credentials, query, or fragment. Optional fields are `ref`, `taskPrompt`, `validationCommands`, `changedFilesAllowlist`, `taskMode` (`patch` or `inspect`), `publishMode` (`auto`, `none`, `branch`, or `pr`), `startupCheck`, `scouting`, and `goalSetting`.
 
-- `kaseki` to use the generic decision endpoint, `task_admission_v1`, and `validation_recovery_v1`.
-- `soyuz` to use the three Soyuz-owned profiles, once an authenticated Soyuz identity is supplied by a future adapter.
-- Unauthenticated callers to use neither.
+String, list, and nested-setting limits are encoded in the published schema and enforced by the runtime validator. The profile returns the existing credential, permission, security-boundary, risk, task-type, and validation-focus answer IDs. Kaseki retains its deterministic admission policy.
 
-The HTTP Worker currently authenticates only Kaseki. The internal engine requires an explicit client identity and checks the profile policy before input validation or provider invocation. A future Cloudflare Service Binding will still need an explicit identity-to-profile permission check.
+### `validation_recovery_v1`
 
-## Versioning and adding profiles
+Requires `command` (up to 1,000 bytes), integer `exitCode` in 0–255, and `output` (up to 6,000 UTF-8 bytes). The provider projection redacts the full bounded output first, then retains at most the final 5,000 UTF-16 code units. It fits the redacted projection to the 8 KiB serialized evidence limit and rechecks that limit before making a provider request. This prevents truncation from removing a credential's identifying prefix and leaving its suffix.
 
-Profile IDs are stable and include their contract version. A behavior change that changes required input, question meaning, answer keys, choice labels, score scale, or result shape requires a new ID such as `some_decision_v2`. A compatible implementation correction may retain the same public profile version when it does not change the contract; record the reason in the decision notes.
+The profile answers `validation_failure_cause` and `validation_recovery_action`. A retry suggestion remains advisory; Kaseki's local retry policy remains authoritative.
 
-To add a profile:
+Redaction follows Kaseki's `redactJevEvidence()` patterns for private keys, bearer credentials, AWS access key IDs, JWT-shaped tokens, URL passwords, common provider/GitHub/chat tokens, and password/token assignments. Key names matching secret patterns are replaced recursively. These deterministic patterns are not a complete credential detector; callers must continue minimising evidence before sending it.
 
-1. Derive its question map and evidence needs from an implemented consumer builder.
-2. Define a typed input and strict, bounded validator.
-3. Build the evidence projection from validated input and keep questions server-owned.
-4. Add a profile-specific output validator that preserves canonical answers.
-5. Add the ID and explicit client permission to the in-code registry and central policy.
-6. Add contract, permission, invalid-input, invalid-output, and mocked-provider tests.
-7. Document its owner, limits, deterministic boundaries, and version semantics.
+## Output and confidence
 
-There is no dynamic module loading, database-backed discovery, caller-supplied question definition, batching, fallback model, or per-profile provider transport.
+Every successful profile response has the same top-level fields: `schemaVersion`, `requestId`, `status`, `profileId`, `profileVersion`, `provider`, `model`, `answers`, `result`, optional `usage`, `durationMs`, and `attemptCount`. `result` is the profile's canonical answer map and duplicates `answers` for compatibility. Resolved model is the provider-returned model ID, not the configured alias.
 
-## Relationship to generic decisions and Phase 2B
+Canonical NouL answers include `noul`, deterministic `true`/`false` probabilities, and `confidence: null`. Choice and score answers carry exact probability maps, validated labels/scales, and numeric or nullable confidence. The public JSON Schemas preserve `null` rather than manufacturing a value.
 
-The generic endpoint remains available to the authenticated Kaseki client for bounded decisions that do not have an approved fixed profile. It accepts a caller-supplied question map, so it remains an internal trusted interface. It shares the same provider adapter and answer validation as profiles.
+Kaseki's current local decision helper and consumer types expect numeric confidence for some answers. Any future adapter must map `null` to unavailable/zero confidence for confidence gates (or otherwise conservatively block confidence-dependent behavior), and must not replace null with a high estimate. This compatibility handling belongs in the consumer adapter; Senku's canonical contract remains nullable.
 
-Phase 2B may add `POST /v1/profiles/{profileId}/evaluate`, authenticated profile discovery, OpenAPI, and a UTCP manual. Those adapters must preserve the registry's client permissions and strict profile input validators. Goal Check, Run Evaluation, context routing, and phase transfer need separate contract work before registration.
+Optional provider usage includes only values OpenRouter supplies. Senku does not estimate usage or cost. Profile errors return the shared safe error envelope; no successful assessment is returned for invalid provider output.
+
+## Ownership and versioning
+
+The sole permission declaration is `src/auth/permissions.ts`. The registry derives public allowed-client metadata and profile ownership from that policy. Tests check that each registered profile's ID, owner, and permissions agree.
+
+The profile's `inputSchema` is a JSON Schema definition used by runtime validation and exposed through discovery. The handwritten domain validator remains responsible for semantic checks such as URL credential rejection and parsed timestamps. Runtime-schema parity tests exercise each profile and bounded edge cases. Output schemas are derived from the server-owned question map, so answer IDs, labels, scales, and nullable confidence remain connected to the inference contract.
+
+Changing required input, question meaning, answer IDs, labels, score scale, or result shape requires a new versioned profile ID. Compatible implementation corrections may retain the version when the public contract is unchanged; document the reason in `docs/PHASE-2B-DECISIONS.md`.
+
+## Generic endpoint and deferred work
+
+`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access. UTCP discovery, MCP, actual Service Binding setup, consumer adapters, storage/history, retries, fallback models, and dashboard changes are outside Phase 2B.
