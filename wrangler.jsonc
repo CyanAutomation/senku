@@ -9,6 +9,18 @@
     "SENKU_PROVIDER_TIMEOUT_MS": "15000",
     "SENKU_PUBLIC_BASE_URL": "https://senku.scheimann.workers.dev"
   },
+  "observability": {
+    "enabled": true,
+    "redact_query_string": true,
+    "logs": {
+      "enabled": true,
+      "head_sampling_rate": 0.1
+    },
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 0.01
+    }
+  },
   "limits": {
     "cpu_ms": 10,
     "subrequests": 1
