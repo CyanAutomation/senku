@@ -103,6 +103,12 @@ describe("versioned decision profile registry", () => {
     expect(profiles[0]).toMatchObject({ owner: "soyuz", allowedClients: ["soyuz"], maxEvidenceBytes: 12 * 1024 });
     expect(profiles[3]).toMatchObject({ owner: "kaseki", allowedClients: ["kaseki"] });
     expect(PROFILE_CLIENT_PERMISSIONS.validation_recovery_v1).toEqual(["kaseki"]);
+    for (const profile of profiles) {
+      const permissions = PROFILE_CLIENT_PERMISSIONS[profile.id as keyof typeof PROFILE_CLIENT_PERMISSIONS];
+      expect(profile.allowedClients).toEqual(permissions);
+      expect(permissions).toContain(profile.owner);
+      expect(profile.id).toBe(profileRegistry.getProfile(profile.id).id);
+    }
   });
 
   it("retains exact Soyuz question IDs, labels, and score scales", () => {
@@ -171,6 +177,8 @@ describe("profile evidence validation and projection", () => {
     expect(v2).toEqual(v1);
     expect(() => kasekiOutputReviewV1Profile.validateInput({ ...outputReviewInput, sourceCode: "do not send" })).toThrow();
     expect(() => kasekiOutputReviewV1Profile.validateInput({ ...outputReviewInput, summary: "x".repeat(2_001) })).toThrow();
+    expect(kasekiOutputReviewV1Profile.validateInput({ ...outputReviewInput, canonicalRun: { ...outputReviewInput.canonicalRun, exitCode: -1 } }).canonicalRun.exitCode).toBe(-1);
+    expect(() => kasekiOutputReviewV1Profile.validateInput({ ...outputReviewInput, canonicalRun: { ...outputReviewInput.canonicalRun, exitCode: -2 } })).toThrow();
     expect(() => kasekiOutputReviewV1Profile.validateInput({ ...outputReviewInput, canonicalRun: { ...outputReviewInput.canonicalRun, exitCode: 256 } })).toThrow();
   });
 
@@ -203,6 +211,67 @@ describe("profile evidence validation and projection", () => {
     expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "x".repeat(6_001) })).toThrow();
     expect(validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "é".repeat(3_000) }).output).toHaveLength(3_000);
     expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "é".repeat(3_001) })).toThrow();
+  });
+
+  it("redacts validation secrets before retaining the output tail, including a credential split by the old boundary", () => {
+    const credential = `Bearer ${"A".repeat(64)}`;
+    const retained = validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "npm test",
+      exitCode: 1,
+      output: `prefix ${credential} suffix`,
+    }));
+    const retainedState = JSON.parse(retained.state as string) as { failure_output: string };
+    expect(retainedState.failure_output).toContain("[REDACTED_CREDENTIAL]");
+    expect(retainedState.failure_output).not.toContain("A".repeat(64));
+
+    const crossingPrefix = "x".repeat(998) + " ";
+    const crossingOutput = crossingPrefix + credential + "y".repeat(6_000 - crossingPrefix.length - credential.length);
+    const crossing = validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "npm test",
+      exitCode: 1,
+      output: crossingOutput,
+    }));
+    const crossingState = JSON.parse(crossing.state as string) as { failure_output: string };
+    expect(crossingState.failure_output).toContain("[REDACTED_CREDENTIAL]");
+    expect(crossingState.failure_output).not.toContain("A".repeat(64));
+  });
+
+  it("redacts common token and password patterns and preserves Unicode at a truncation boundary", () => {
+    const sensitive = [
+      "Authorization: Bearer " + "b".repeat(40),
+      "AWS key AKIA" + "B".repeat(16),
+      "JWT eyJ" + "c".repeat(24) + "." + "d".repeat(24) + "." + "e".repeat(24),
+      "password=hunter2",
+      "https://user:private-value@example.test/path",
+    ].join(" ");
+    const output = "z".repeat(4_000) + sensitive;
+    const state = JSON.parse(validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "Authorization: Bearer " + "f".repeat(40),
+      exitCode: 1,
+      output,
+    })).state as string) as { command: string; failure_output: string };
+    expect(state.command).not.toContain("f".repeat(40));
+    expect(state.failure_output).not.toContain("b".repeat(40));
+    expect(state.failure_output).not.toContain("AKIA" + "B".repeat(16));
+    expect(state.failure_output).not.toContain("private-value");
+    expect(state.failure_output).not.toContain("hunter2");
+
+    const unicode = "x".repeat(99) + "😀" + "y".repeat(4_999);
+    const unicodeState = JSON.parse(validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "npm test", exitCode: 1, output: unicode,
+    })).state as string) as { failure_output: string };
+    expect(unicodeState.failure_output).not.toContain("\uFFFD");
+    expect(() => JSON.stringify(unicodeState)).not.toThrow();
+  });
+
+  it("keeps the final redacted validation evidence inside the evidence byte limit", () => {
+    const stateText = validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "npm test",
+      exitCode: 1,
+      output: "\"".repeat(6_000),
+    })).state as string;
+    expect(new TextEncoder().encode(stateText).byteLength).toBeLessThanOrEqual(validationRecoveryProfile.maxEvidenceBytes);
+    expect(JSON.parse(stateText).failure_output.length).toBeLessThan(5_000);
   });
 
   it("rejects missing, unexpected, wrong-type, and out-of-scale profile answers", () => {

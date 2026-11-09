@@ -1,144 +1,165 @@
-# HTTP contract
+# REST API contract
 
-The HTTP surface remains the three routes below. Phase 2A adds a typed, versioned profile engine for internal callers, but does not expose profile evaluation or discovery over HTTP. The five registered profiles and their contracts are documented in [PROFILES.md](PROFILES.md).
+Senku exposes a versioned REST API. All JSON responses use `Cache-Control: no-store`. The Worker does not enable CORS.
 
 ## Routes
 
-| Method and path | Authentication | Success |
+| Method | Path | Authentication and behavior |
 | --- | --- | --- |
-| GET /healthz | None | 200 with { "status": "ok" } |
-| GET /readyz | None | 200 with { "status": "ready" } or 503 with { "status": "not_ready" } |
-| POST /v1/decisions | Bearer token | 200 with a completed version 1 decision response |
+| `POST` | `/v1/decisions` | Kaseki only. Accepts bounded dynamic JEV questions for trusted Kaseki workloads. |
+| `POST` | `/v1/profiles/{profileId}/evaluate` | Bearer authenticated. Checks profile permission before reading evidence or calling JEV. |
+| `GET` | `/v1/profiles` | Bearer authenticated. Lists only profiles the identity may invoke. |
+| `GET` | `/v1/profiles/{profileId}` | Bearer authenticated. Returns the permitted profile's input and output JSON Schemas and limits. A known but forbidden profile returns 403 without its details. |
+| `GET` | `/openapi.json` | Bearer authenticated. Returns a deterministic OpenAPI 3.1 document filtered to the caller's allowed profiles. |
+| `GET` | `/healthz` | Public liveness response; no configuration or provider call. |
+| `GET` | `/readyz` | Public readiness response; no provider call or secret disclosure. |
 
-The generic decision endpoint authenticates the Kaseki machine identity using `SENKU_KASEKI_API_TOKEN`. It does not authorise Soyuz or browser callers. The configured token must be 32–1,024 printable ASCII characters with no whitespace; malformed configuration fails closed and makes readiness return `not_ready`. The internal profile engine separately checks the supplied machine identity against each profile's owner policy before input validation or provider invocation. Only Kaseki is currently authenticated by the Worker. The OpenRouter credential is never sent to a client. No CORS headers are enabled.
+Wrong methods return 405 with `Allow`. Unknown routes return 404.
 
-Wrong methods on known routes return 405 and an Allow header. Unsupported paths return 404. Health and readiness never call the provider. Readiness checks that authentication, provider credentials, the exact configured model alias, and the timeout have valid configuration; it returns no settings or secrets.
+## Machine identity and permission matrix
 
-## Request
+The Worker authenticates `Authorization: Bearer <token>` against two separate secrets:
 
-Requests must use Content-Type application/json and the following exact top-level fields:
+| Identity | Secret | Generic decisions | Permitted profiles |
+| --- | --- | --- | --- |
+| Kaseki | `SENKU_KASEKI_API_TOKEN` | Yes | `task_admission_v1`, `validation_recovery_v1` |
+| Soyuz | `SENKU_SOYUZ_API_TOKEN` | No | `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2` |
 
-    {
-      "schemaVersion": "1",
-      "state": "or a bounded JSON object",
-      "questions": {
-        "failure_cause": {
-          "type": "choice",
-          "instructions": "Classify the likely failure.",
-          "criteria": {
-            "transient": "Temporary environment issue",
-            "code_defect": "Application code defect",
-            "unknown": null
-          }
-        },
-        "safe_to_retry": {
-          "type": "noul",
-          "instructions": "Is this failure likely transient?"
-        },
-        "completion": {
-          "type": "score",
-          "instructions": "How complete is the result?",
-          "criteria": ["not complete", "partly complete", "complete"]
-        }
-      }
+Both values must be configured, valid, and different. Each is 32–1,024 printable ASCII characters without whitespace. An absent, malformed, or duplicated credential configuration fails closed for all bearer-authenticated operations; readiness is false. Token comparison uses SHA-256 digests and a fixed-length byte loop. Credentials are never logged or returned.
+
+Identity is established only from the authenticated token. Senku ignores client identity supplied in JSON, query parameters, or headers. The HTTP layer exposes an internal `resolveIdentity` dependency for future trusted server-derived identity, so a Service Binding integration need not change the profile engine. That seam is not populated from caller-controlled request data. A Service Binding by itself grants no profile permission.
+
+The authoritative policy lives in `src/auth/permissions.ts`. Registry metadata and discovery are derived from that policy rather than a second client list.
+
+## Profile evaluation
+
+`POST /v1/profiles/{profileId}/evaluate` accepts JSON with this envelope:
+
+```json
+{
+  "schemaVersion": "1",
+  "input": {
+    "run": {
+      "status": "failed",
+      "stage": "validation",
+      "operationalHealth": "suspect_stalled",
+      "failureClass": "provider_failure",
+      "createdAt": "2026-11-08T12:00:00.000Z",
+      "queuedAt": "2026-11-08T12:00:01.000Z",
+      "startedAt": "2026-11-08T12:00:02.000Z",
+      "completedAt": "2026-11-08T12:00:03.000Z",
+      "lastHeartbeatAt": "2026-11-08T12:00:02.500Z"
     }
+  }
+}
+```
 
-The request fields are strict. A caller cannot choose the model or provider. Senku always sends the exact model alias `~typesafe/jev-latest`. If `JEV_MODEL` is set, it must equal that exact value. OpenRouter may resolve the alias to a different dated model over time; the response retains that resolved identifier. Schema version 1 accepts:
+The `input` object must match the selected profile's exact contract. Unknown fields are rejected. Callers provide evidence, never JEV questions, instructions, model names, or provider URLs. See [PROFILES.md](PROFILES.md) and the authenticated `/v1/profiles/{profileId}` route for full schemas.
 
-- State as a non-empty string or a JSON object. The Soyuz string state and Kaseki structured object state are both supported.
-- One to 64 questions. IDs match lowercase letters, digits, and underscores, starting with a letter and no longer than 64 characters.
-- NouL with non-empty instructions and optional binary criteria. Criteria may contain either or both of true and false. This supports Kaseki's optional and partial binary criteria.
-- Choice with two to 12 options. Option IDs use the same restricted identifier form as question IDs. Descriptions may be strings, arrays, or objects; null descriptions are accepted for Kaseki compatibility.
-- Score with two to 12 ordered levels. A level may be a string, array, or object.
-- Instructions and structured content are bounded by the total request size, a 16 KiB per-string limit, a nesting depth of 24, and a combined 8,192-node validation budget.
+Successful evaluations return the same envelope shape for every profile:
 
-The Worker reads the stream and enforces a 128 KiB UTF-8 request-body limit even when Content-Length is missing or inaccurate. It also checks Content-Length early when present. Malformed JSON, unsupported types, invalid identifiers, extra fields, and out-of-range counts are rejected before inference.
+```json
+{
+  "schemaVersion": "1",
+  "requestId": "dec-00000000-0000-4000-8000-000000000000",
+  "status": "completed",
+  "profileId": "run_operations_triage_v1",
+  "profileVersion": "1",
+  "provider": "jev",
+  "model": "typesafe/jev-resolved-version",
+  "answers": {},
+  "result": {},
+  "usage": { "input_tokens": 120 },
+  "durationMs": 840,
+  "attemptCount": 1
+}
+```
 
-## Response
+`usage` is omitted when the provider supplies none. `result` retains the profile's canonical answer map and duplicates `answers` for a stable envelope. Canonical choice and score answers support `confidence: null`; NouL answers always have null confidence because that result type does not carry a separate confidence value. The API never substitutes a guessed confidence.
 
-Completed responses use this envelope:
+The server validates evidence, builds the fixed profile questions, makes exactly one provider attempt, validates all returned answer keys and values, and only then returns a successful assessment. Errors never contain raw evidence, question prompts, provider responses, credentials, or stack traces. Failures do not produce a successful `result`.
 
+## Discovery and OpenAPI
+
+`GET /v1/profiles` returns:
+
+```json
+{
+  "schemaVersion": "1",
+  "profiles": [
     {
-      "schemaVersion": "1",
-      "requestId": "dec-00000000-0000-4000-8000-000000000000",
-      "status": "completed",
-      "provider": "jev",
-      "model": "typesafe/jev-1.14-20261014",
-      "answers": {
-        "safe_to_retry": {
-          "type": "noul",
-          "noul": 0.91,
-          "probabilities": { "false": 0.09, "true": 0.91 },
-          "confidence": null
-        },
-        "failure_cause": {
-          "type": "choice",
-          "choice": "transient",
-          "probabilities": {
-            "transient": 0.94,
-            "code_defect": 0.04,
-            "unknown": 0.02
-          },
-          "confidence": 0.94
-        },
-        "completion": {
-          "type": "score",
-          "score": 1.9,
-          "legend": {
-            "0": "not complete",
-            "1": "partly complete",
-            "2": "complete"
-          },
-          "probabilities": { "0": 0.01, "1": 0.08, "2": 0.91 },
-          "confidence": 0.91
-        }
-      },
-      "usage": { "input_tokens": 420, "output_tokens": 30 },
-      "durationMs": 850,
-      "attemptCount": 1
+      "id": "run_operations_triage_v1",
+      "version": "1",
+      "name": "Run operations triage",
+      "description": "Assess retained Kaseki run operational metadata using Soyuz's approved projection.",
+      "owner": "soyuz",
+      "questionCount": 3,
+      "maxEvidenceBytes": 12288,
+      "operations": ["evaluate"]
     }
+  ]
+}
+```
 
-The resolved provider model is retained from the provider response. NouL probabilities are derived deterministically from the provider's noul probability; confidence is null because the provider does not supply a separate NouL confidence. Missing or explicitly null choice/score confidence is represented as null. If the provider omits a score legend, Senku reconstructs it from the declared score criteria. The choice and score probability distributions are validated against the requested keys and must sum to 1 within 0.03.
+The list is filtered by the central permission policy. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
 
-Usage is optional and is only returned when supplied by OpenRouter. Senku preserves supported `input_tokens`, `output_tokens`, `total_tokens`, and `cost` values; it never estimates missing counts or costs. `durationMs` measures the provider call and response validation. The provider attempt count is always one. A future Kaseki adapter maps `durationMs` to its `responseTime` field and must represent nullable choice/score confidence.
+`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes. The authenticated document includes only the profile contracts available to that identity. Kaseki's document includes `POST /v1/decisions`; Soyuz's does not advertise an operation it cannot use. The Worker has automated structural, route, reference, permission, and schema/runtime parity checks.
 
-OpenRouter's optional request-level `annotations` array is accepted only as bounded JSON source objects and discarded. It is not returned, logged, or persisted. The whole provider response remains limited to 64 KiB; annotations have an additional 32-object and 16 KiB JSON limit. The top-level provider response validator continues to reject unknown fields.
+## Generic decisions
 
-All responses include Cache-Control: no-store. Provider errors are never returned as completed answers.
+`POST /v1/decisions` retains the Phase 1 contract:
 
-## Errors
-
-Errors use this envelope:
-
-    {
-      "error": {
-        "code": "PROVIDER_UNAVAILABLE",
-        "message": "The decision provider is unavailable.",
-        "retryable": true,
-        "requestId": "dec-00000000-0000-4000-8000-000000000000"
-      }
+```json
+{
+  "schemaVersion": "1",
+  "state": { "status": "failed", "exitCode": 1 },
+  "questions": {
+    "likely_transient": {
+      "type": "noul",
+      "instructions": "Does the evidence suggest a transient failure?"
     }
+  }
+}
+```
 
-| Code | HTTP | Retryable policy |
+Question types are `noul`, `choice`, and `score`. The generic endpoint remains Kaseki-only even though Soyuz has its own profile token. It is intended for trusted internal workloads and is not an open public classifier.
+
+## Bounds and errors
+
+The streamed request body limit is 128 KiB; the provider response limit is 64 KiB. Global limits include 64 questions, 12 options per choice or score, content depth 24, 8,192 content nodes, and 16 KiB per instruction. Each profile has a smaller projected-evidence cap documented in [PROFILES.md](PROFILES.md).
+
+Errors use the established envelope:
+
+```json
+{
+  "error": {
+    "code": "FORBIDDEN",
+    "message": "The authenticated client is not permitted to use this endpoint.",
+    "retryable": false,
+    "requestId": "dec-00000000-0000-4000-8000-000000000000"
+  }
+}
+```
+
+| Internal condition | HTTP | Public code |
 | --- | ---: | --- |
-| INVALID_REQUEST | 400, 405, or 415 | No |
-| UNAUTHENTICATED | 401 | No |
-| FORBIDDEN | 403 | No; identity is authenticated but lacks permission |
-| PAYLOAD_TOO_LARGE | 413 | No |
-| UNSUPPORTED_SCHEMA_VERSION | 400 | No |
-| NOT_CONFIGURED | 503 | No |
-| PROVIDER_TIMEOUT | 504 | Yes |
-| PROVIDER_UNAVAILABLE | 502 | Yes for network errors, timeouts, 408, 425, 429, or 5xx; otherwise no |
-| INVALID_PROVIDER_RESPONSE | 502 | No |
-| NOT_FOUND | 404 | No |
-| INTERNAL_ERROR | 500 | No |
+| Malformed request, invalid profile input, or unsupported schema version | 400 | `INVALID_REQUEST` or `UNSUPPORTED_SCHEMA_VERSION` |
+| Missing or invalid bearer token | 401 | `UNAUTHENTICATED` |
+| Authenticated identity lacks permission | 403 | `FORBIDDEN` |
+| Unknown route | 404 | `NOT_FOUND` |
+| Unknown or unauthorized profile ID | 403 | `FORBIDDEN` |
+| Request or profile evidence over its limit | 413 | `PAYLOAD_TOO_LARGE` |
+| Invalid service configuration | 503 | `NOT_CONFIGURED` |
+| Invalid provider response/profile output | 502 | `INVALID_PROVIDER_RESPONSE` |
+| Provider unavailable | 502 | `PROVIDER_UNAVAILABLE` |
+| Provider timeout | 504 | `PROVIDER_TIMEOUT` |
+| Unexpected internal failure | 500 | `INTERNAL_ERROR` |
+| Wrong HTTP method | 405 | `INVALID_REQUEST` plus `Allow` |
 
-Public errors do not contain raw provider bodies, caller input, credentials, or stack traces. Request IDs correlate errors with structured logs.
+Provider errors preserve their retryable classification. No automatic retry is performed.
 
-## Provider limits
+## Provider and deployment behavior
 
-The Worker sends one request to OpenRouter's fixed Decisions API URL with the server-configured JEV model. The default timeout is 15 seconds; a configured timeout must be from 1,000 to 30,000 ms. Provider response bodies are streamed and capped at 64 KiB. Redirects are rejected. Automatic retries are disabled.
+Senku always sends one request to the fixed OpenRouter Decisions API endpoint and uses only `~typesafe/jev-latest`. It returns the resolved model identifier from OpenRouter. Model selection, endpoint, identity, question map, and provider credential are never caller-controlled. The dedicated Senku OpenRouter key should have a provider-side spending limit; its configuration has not been verified here.
 
-## Internal profile engine
-
-The profile registry is code-owned and contains `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2`, `task_admission_v1`, and `validation_recovery_v1`. Each fixes its input projection, question map, owner, output validator, and evidence-size limit. Callers cannot provide questions, model, or provider URL. Kaseki owns the generic endpoint and the two Kaseki profiles. Soyuz owns the three Soyuz profiles, but a Soyuz credential or Service Binding transport is not implemented. Profile calls use the shared provider adapter once and return typed answers with safe operational metadata. The profiles are internal TypeScript APIs, not HTTP routes; see [PROFILES.md](PROFILES.md) for field-level contracts and deterministic safety boundaries.
+The Worker remains stateless and uses one provider subrequest per evaluation. `/readyz` checks both machine tokens, distinctness, provider configuration, model alias, and timeout range without contacting OpenRouter. Production deployment, UTCP/MCP routes, Service Binding setup, and consumer migrations are deferred.

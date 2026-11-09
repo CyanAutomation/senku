@@ -11,6 +11,20 @@ export const LIMITS = {
   instructionBytes: 16 * 1024,
 } as const;
 
+export const ERROR_CODES = [
+  "INVALID_REQUEST",
+  "UNAUTHENTICATED",
+  "FORBIDDEN",
+  "PAYLOAD_TOO_LARGE",
+  "UNSUPPORTED_SCHEMA_VERSION",
+  "NOT_CONFIGURED",
+  "PROVIDER_TIMEOUT",
+  "PROVIDER_UNAVAILABLE",
+  "INVALID_PROVIDER_RESPONSE",
+  "NOT_FOUND",
+  "INTERNAL_ERROR",
+] as const;
+
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JevContent = string | JsonValue[] | { [key: string]: JsonValue };
@@ -85,18 +99,7 @@ export interface DecisionResponse {
   attemptCount: 1;
 }
 
-export type ErrorCode =
-  | "INVALID_REQUEST"
-  | "UNAUTHENTICATED"
-  | "FORBIDDEN"
-  | "PAYLOAD_TOO_LARGE"
-  | "UNSUPPORTED_SCHEMA_VERSION"
-  | "NOT_CONFIGURED"
-  | "PROVIDER_TIMEOUT"
-  | "PROVIDER_UNAVAILABLE"
-  | "INVALID_PROVIDER_RESPONSE"
-  | "NOT_FOUND"
-  | "INTERNAL_ERROR";
+export type ErrorCode = typeof ERROR_CODES[number];
 
 export interface ErrorResponse {
   error: {
@@ -110,6 +113,7 @@ export interface ErrorResponse {
 export interface Environment {
   OPENROUTER_API_KEY?: string;
   SENKU_KASEKI_API_TOKEN?: string;
+  SENKU_SOYUZ_API_TOKEN?: string;
   JEV_MODEL?: string;
   SENKU_PROVIDER_TIMEOUT_MS?: string;
 }

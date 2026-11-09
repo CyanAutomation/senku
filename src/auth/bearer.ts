@@ -1,7 +1,8 @@
 import type { Environment } from "../contracts/decisions";
+import type { ClientIdentity } from "./permissions";
 
 export type AuthenticationResult =
-  | { authenticated: true; clientId: "kaseki" }
+  | { authenticated: true; clientId: ClientIdentity }
   | { authenticated: false; reason: "not_configured" | "invalid_credentials" };
 
 const encoder = new TextEncoder();
@@ -31,12 +32,21 @@ async function constantTimeTokenMatch(candidate: string, expected: string): Prom
   return mismatch === 0;
 }
 
+export function areMachineTokenCredentialsDistinct(
+  env: Environment,
+): env is Environment & { SENKU_KASEKI_API_TOKEN: string; SENKU_SOYUZ_API_TOKEN: string } {
+  const kaseki = env.SENKU_KASEKI_API_TOKEN;
+  const soyuz = env.SENKU_SOYUZ_API_TOKEN;
+  return isMachineTokenConfigValid(kaseki)
+    && isMachineTokenConfigValid(soyuz)
+    && kaseki !== soyuz;
+}
+
 export async function authenticateBearer(
   authorization: string | null,
   env: Environment,
 ): Promise<AuthenticationResult> {
-  const expected = env.SENKU_KASEKI_API_TOKEN;
-  if (!isMachineTokenConfigValid(expected)) {
+  if (!areMachineTokenCredentialsDistinct(env)) {
     return { authenticated: false, reason: "not_configured" };
   }
   if (!authorization) return { authenticated: false, reason: "invalid_credentials" };
@@ -47,8 +57,13 @@ export async function authenticateBearer(
     return { authenticated: false, reason: "invalid_credentials" };
   }
   try {
-    return await constantTimeTokenMatch(match[1], expected)
-      ? { authenticated: true, clientId: "kaseki" }
+    const matches = await Promise.all([
+      constantTimeTokenMatch(match[1], env.SENKU_KASEKI_API_TOKEN).then((matches) => ({ clientId: "kaseki" as const, matches })),
+      constantTimeTokenMatch(match[1], env.SENKU_SOYUZ_API_TOKEN).then((matches) => ({ clientId: "soyuz" as const, matches })),
+    ]);
+    const matched = matches.filter((item) => item.matches);
+    return matched.length === 1
+      ? { authenticated: true, clientId: matched[0].clientId }
       : { authenticated: false, reason: "invalid_credentials" };
   } catch {
     return { authenticated: false, reason: "invalid_credentials" };

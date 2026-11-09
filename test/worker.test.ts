@@ -7,6 +7,7 @@ import { soyuzRequest } from "./fixtures/soyuz-request";
 const env: Environment = {
   OPENROUTER_API_KEY: "test-openrouter-key",
   SENKU_KASEKI_API_TOKEN: "test-client-token-0123456789abcdef",
+  SENKU_SOYUZ_API_TOKEN: "test-soyuz-token-0123456789abcdef",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
@@ -209,11 +210,13 @@ describe("Worker routes and decision orchestration", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("returns 404 and 405 for unimplemented routes and methods", async () => {
+  it("returns 403 for unknown profile routes and 405 for unsupported methods", async () => {
     const worker = createTestWorker(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
-    const missing = await worker.fetch(new Request("https://senku.test/v1/profiles"), env);
-    expect(missing.status).toBe(404);
-    expect((await missing.json() as { error: { code: string } }).error.code).toBe("NOT_FOUND");
+    const missing = await worker.fetch(new Request("https://senku.test/v1/profiles/no_such_profile", {
+      headers: { authorization: "Bearer test-client-token-0123456789abcdef" },
+    }), env);
+    expect(missing.status).toBe(403);
+    expect((await missing.json() as { error: { code: string } }).error.code).toBe("FORBIDDEN");
 
     const wrongMethod = await worker.fetch(new Request("https://senku.test/v1/decisions"), env);
     expect(wrongMethod.status).toBe(405);

@@ -1,12 +1,47 @@
 import type { DecisionQuestion } from "../../contracts/decisions";
-import type { AnswersFor, DecisionProfile } from "../../contracts/profiles";
+import type { AnswersFor, DecisionProfile, JsonSchema } from "../../contracts/profiles";
 import { ProfileEngineError } from "../../contracts/profiles";
-import { allowedClientsForProfile, profileOwner } from "../../auth/permissions";
+import { profileOwner } from "../../auth/permissions";
 import { jsonState, redactKasekiEvidence, requireOnlyKeys, requireOptionalEnum, requireOptionalStringArray, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
 
 const PROFILE_ID = "task_admission_v1" as const;
 const TASK_MODES = ["patch", "inspect"] as const;
 const PUBLISH_MODES = ["auto", "none", "branch", "pr"] as const;
+
+const stageSettingsSchema: JsonSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    enabled: { type: "boolean" },
+      model: { type: "string", minLength: 1, maxLength: 256, pattern: "\\S", "x-maxBytes": 256 },
+    timeoutSeconds: { type: "integer", minimum: 60, maximum: 10_800 },
+  },
+};
+
+const inputSchema: JsonSchema = {
+  type: "object",
+  required: ["repoUrl"],
+  additionalProperties: false,
+  properties: {
+    repoUrl: {
+      type: "string", format: "uri", maxLength: 2_048, "x-maxBytes": 2_048,
+      "x-allowedProtocols": ["https:", "http:"],
+      "x-disallowUserInfo": true,
+      "x-disallowQuery": true,
+      "x-disallowFragment": true,
+      description: "HTTP or HTTPS repository URL without credentials, query, or fragment.",
+    },
+    ref: { type: "string", minLength: 1, maxLength: 256, pattern: "\\S", "x-maxBytes": 256 },
+    taskPrompt: { type: "string", minLength: 10, maxLength: 16_384, pattern: "\\S", "x-maxBytes": 16_384 },
+    validationCommands: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 512, pattern: "\\S", "x-maxBytes": 512 } },
+    changedFilesAllowlist: { type: "array", maxItems: 64, items: { type: "string", minLength: 1, maxLength: 512, pattern: "\\S", "x-maxBytes": 512 } },
+    taskMode: { type: "string", enum: TASK_MODES },
+    publishMode: { type: "string", enum: PUBLISH_MODES },
+    startupCheck: { type: "boolean" },
+    scouting: stageSettingsSchema,
+    goalSetting: stageSettingsSchema,
+  },
+};
 
 const questions = {
   contains_credentials: {
@@ -147,9 +182,9 @@ export const taskAdmissionProfile: DecisionProfile<
   description: "Provide advisory risk and routing classifications; Kaseki's deterministic admission policy remains authoritative.",
   owner: profileOwner(PROFILE_ID),
   version: "1",
-  allowedClients: allowedClientsForProfile(PROFILE_ID),
   maxEvidenceBytes: 32 * 1024,
   questions,
+  inputSchema,
   validateInput,
   buildDecision(input) {
     const projection = redactKasekiEvidence({

@@ -1,8 +1,13 @@
-import { authenticateBearer, isMachineTokenConfigValid } from "./auth/bearer";
-import { canUseGenericDecisions } from "./auth/permissions";
+import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
+import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
+import { buildOpenApiDocument } from "./api/openapi";
+import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
 import { validateDecisionRequest } from "./contracts/validation";
 import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
+import { ProfileEngineError } from "./contracts/profiles";
+import { evaluateProfile } from "./decisions/profile-engine";
+import { profileRegistry, type RegisteredProfileId } from "./decisions/profile-registry";
 import {
   DEFAULT_PROVIDER_TIMEOUT_MS,
   MAX_PROVIDER_TIMEOUT_MS,
@@ -16,6 +21,8 @@ import { consoleLogger, safeLog, type Logger } from "./observability/log";
 export interface WorkerDependencies {
   fetchImpl?: typeof fetch;
   logger?: Logger;
+  /** Trusted internal identity seam for future server-side callers; never populated from request data. */
+  resolveIdentity?: (request: Request, env: Environment) => Promise<AuthenticationResult>;
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -43,7 +50,7 @@ function timeoutIsStructurallyValid(env: Environment): boolean {
 }
 
 function ready(env: Environment): boolean {
-  return isMachineTokenConfigValid(env.SENKU_KASEKI_API_TOKEN)
+  return areMachineTokenCredentialsDistinct(env)
     && resolveProviderConfig(env).ok
     && timeoutIsStructurallyValid(env);
 }
@@ -109,10 +116,13 @@ function logFailure(
     questionCount?: number;
     workerDurationMs: number;
     providerDurationMs?: number;
+    attemptCount?: number;
+    profileId?: string;
+    event?: string;
   },
 ): void {
   safeLog(logger, {
-    event: "decision.request_failed",
+    event: details.event ?? "decision.request_failed",
     requestId: details.requestId,
     clientId: details.clientId ?? "unknown",
     status: details.error.code,
@@ -123,8 +133,58 @@ function logFailure(
     questionCount: details.questionCount,
     providerDurationMs: details.providerDurationMs,
     workerDurationMs: details.workerDurationMs,
-    attemptCount: 0,
+    attemptCount: details.attemptCount ?? 0,
+    profileId: details.profileId,
   });
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+function profileIdFromPath(value: string): string | null {
+  try {
+    const decoded = decodeURIComponent(value);
+    return /^[a-z][a-z0-9_]{0,63}$/.test(decoded) ? decoded : null;
+  } catch {
+    return null;
+  }
+}
+
+function profileApiError(error: unknown): ApiError {
+  if (error instanceof ApiError) return error;
+  if (error instanceof ProviderError) return new ApiError(error.code, error.retryable);
+  if (error instanceof ProfileEngineError) {
+    switch (error.code) {
+      case "UNKNOWN_PROFILE": return new ApiError("NOT_FOUND");
+      case "FORBIDDEN_PROFILE": return new ApiError("FORBIDDEN");
+      case "INVALID_PROFILE_INPUT": return new ApiError("INVALID_REQUEST");
+      case "PROFILE_INPUT_TOO_LARGE": return new ApiError("PAYLOAD_TOO_LARGE");
+      case "INVALID_PROFILE_CONFIGURATION": return new ApiError("INTERNAL_ERROR");
+      case "INVALID_PROFILE_OUTPUT": return new ApiError("INVALID_PROVIDER_RESPONSE");
+      case "NOT_CONFIGURED": return new ApiError("NOT_CONFIGURED");
+      case "DUPLICATE_PROFILE": return new ApiError("INTERNAL_ERROR");
+    }
+  }
+  return new ApiError("INTERNAL_ERROR");
+}
+
+function profileInputFromEnvelope(value: unknown): unknown {
+  if (!isRecord(value)) throw new ApiError("INVALID_REQUEST");
+  if (typeof value.schemaVersion === "string" && value.schemaVersion !== "1") {
+    throw new ApiError("UNSUPPORTED_SCHEMA_VERSION");
+  }
+  if (value.schemaVersion !== "1" || !Object.hasOwn(value, "input")
+    || Object.keys(value).some((key) => key !== "schemaVersion" && key !== "input")) {
+    throw new ApiError("INVALID_REQUEST");
+  }
+  return value.input;
+}
+
+function authError(authentication: Exclude<AuthenticationResult, { authenticated: true }>): ApiError {
+  return new ApiError(authentication.reason === "not_configured" ? "NOT_CONFIGURED" : "UNAUTHENTICATED");
 }
 
 export function createWorker(dependencies: WorkerDependencies = {}): {
@@ -132,6 +192,8 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
 } {
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const logger = dependencies.logger ?? consoleLogger;
+  const resolveIdentity = dependencies.resolveIdentity
+    ?? ((request: Request, env: Environment) => authenticateBearer(request.headers.get("authorization"), env));
 
   return {
     async fetch(request: Request, env: Environment): Promise<Response> {
@@ -160,6 +222,174 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         return jsonResponse({ status: isReady ? "ready" : "not_ready" }, isReady ? 200 : 503);
       }
 
+      const profileEvaluationMatch = /^\/v1\/profiles\/([^/]+)\/evaluate$/.exec(url.pathname);
+      const profileDetailMatch = /^\/v1\/profiles\/([^/]+)$/.exec(url.pathname);
+      const isProfileList = url.pathname === "/v1/profiles";
+      const isOpenApi = url.pathname === "/openapi.json";
+      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi) {
+        const expectedMethod = profileEvaluationMatch ? "POST" : "GET";
+        const logPath = isProfileList
+          ? "/v1/profiles"
+          : isOpenApi
+            ? "/openapi.json"
+            : profileEvaluationMatch
+              ? "/v1/profiles/{profileId}/evaluate"
+              : "/v1/profiles/{profileId}";
+        if (request.method !== expectedMethod) {
+          const error = new ApiError("INVALID_REQUEST", false, 405);
+          const response = errorResponse(error, id);
+          response.headers.set("allow", expectedMethod);
+          return response;
+        }
+
+        const authentication = await resolveIdentity(request, env);
+        if (!authentication.authenticated) {
+          const error = authError(authentication);
+          logFailure(logger, {
+            requestId: id,
+            error,
+            method: request.method,
+            path: logPath,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.request_failed",
+          });
+          return errorResponse(error, id);
+        }
+
+        if (isProfileList) {
+          return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
+        }
+        if (isOpenApi) return jsonResponse(buildOpenApiDocument(authentication.clientId));
+
+        const profileId = profileIdFromPath((profileDetailMatch ?? profileEvaluationMatch)![1]);
+        if (!profileId) {
+          const error = new ApiError("INVALID_REQUEST");
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error,
+            method: request.method,
+            path: logPath,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.request_failed",
+          });
+          return errorResponse(error, id);
+        }
+
+        if (!canEvaluateProfile(profileId, authentication.clientId)) {
+          const error = new ApiError("FORBIDDEN");
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error,
+            method: request.method,
+            path: logPath,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.request_failed",
+          });
+          return errorResponse(error, id);
+        }
+
+        let profile;
+        try {
+          profile = profileRegistry.getProfile(profileId);
+        } catch (error) {
+          const apiError = profileApiError(error);
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error: apiError,
+            method: request.method,
+            path: logPath,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.request_failed",
+          });
+          return errorResponse(apiError, id);
+        }
+
+        if (profileDetailMatch) return jsonResponse(getPublicProfileContract(profileId));
+
+        if (!hasJsonContentType(request)) {
+          const error = new ApiError("INVALID_REQUEST", false, 415);
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error,
+            method: request.method,
+            path: logPath,
+            profileId,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.evaluation_failed",
+          });
+          return errorResponse(error, id);
+        }
+
+        let requestBytes = 0;
+        let providerAttempts = 0;
+        const questionCount = Object.keys(profile.questions).length;
+        const trackedFetch: typeof fetch = (input, init) => {
+          providerAttempts += 1;
+          return fetchImpl(input, init);
+        };
+        try {
+          const input = await readBoundedRequest(request);
+          requestBytes = input.size;
+          const profileInput = profileInputFromEnvelope(parseJson(input.bytes));
+          const result = await evaluateProfile(profileId as RegisteredProfileId, profileInput, {
+            clientIdentity: authentication.clientId,
+          }, { env, fetchImpl: trackedFetch });
+          const response = {
+            schemaVersion: "1",
+            requestId: id,
+            status: "completed",
+            profileId: result.profileId,
+            profileVersion: result.profileVersion,
+            provider: "jev",
+            model: result.model,
+            answers: result.answers,
+            result: result.result,
+            ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
+            durationMs: result.metadata.providerDurationMs,
+            attemptCount: result.metadata.attemptCount,
+          };
+          safeLog(logger, {
+            event: "profile.evaluation_completed",
+            requestId: id,
+            clientId: authentication.clientId,
+            profileId: result.profileId,
+            profileVersion: result.profileVersion,
+            status: "completed",
+            method: request.method,
+            path: logPath,
+            model: result.model,
+            questionCount: result.metadata.questionCount,
+            evidenceBytes: result.metadata.evidenceBytes,
+            requestBytes,
+            providerDurationMs: result.metadata.providerDurationMs,
+            workerDurationMs: elapsedMs(started),
+            attemptCount: result.metadata.attemptCount,
+            ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
+          });
+          return jsonResponse(response);
+        } catch (error) {
+          const apiError = profileApiError(error);
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error: apiError,
+            method: request.method,
+            path: logPath,
+            requestBytes,
+            questionCount,
+            attemptCount: providerAttempts,
+            profileId,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.evaluation_failed",
+          });
+          return errorResponse(apiError, id);
+        }
+      }
+
       if (url.pathname !== "/v1/decisions") {
         const error = new ApiError("NOT_FOUND");
         return errorResponse(error, id);
@@ -172,9 +402,9 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         return response;
       }
 
-      const authentication = await authenticateBearer(request.headers.get("authorization"), env);
+      const authentication = await resolveIdentity(request, env);
       if (!authentication.authenticated) {
-        const error = new ApiError(authentication.reason === "not_configured" ? "NOT_CONFIGURED" : "UNAUTHENTICATED");
+        const error = authError(authentication);
         logFailure(logger, {
           requestId: id,
           error,
@@ -227,6 +457,11 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
 
       let requestBytes = 0;
       let questionCount: number | undefined;
+      let providerAttempts = 0;
+      const trackedFetch: typeof fetch = (input, init) => {
+        providerAttempts += 1;
+        return fetchImpl(input, init);
+      };
       try {
         const input = await readBoundedRequest(request);
         requestBytes = input.size;
@@ -238,7 +473,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         const providerStarted = performance.now();
         let result: Awaited<ReturnType<typeof requestOpenRouterDecision>>;
         try {
-          result = await requestOpenRouterDecision(validated.value, config, fetchImpl);
+          result = await requestOpenRouterDecision(validated.value, config, trackedFetch);
         } catch (error) {
           if (error instanceof ProviderError) {
             const apiError = new ApiError(error.code, error.retryable);
@@ -251,6 +486,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
               path: url.pathname,
               requestBytes,
               questionCount,
+              attemptCount: providerAttempts,
               workerDurationMs: elapsedMs(started),
               providerDurationMs,
             });
@@ -283,7 +519,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
           requestBytes,
           providerDurationMs: durationMs,
           workerDurationMs: elapsedMs(started),
-          attemptCount: 1,
+          attemptCount: providerAttempts,
           ...(result.usage ? { usage: result.usage } : {}),
         });
         return jsonResponse(response);
@@ -297,6 +533,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
           path: url.pathname,
           requestBytes,
           questionCount,
+          attemptCount: providerAttempts,
           workerDurationMs: elapsedMs(started),
         });
         return errorResponse(apiError, id);
