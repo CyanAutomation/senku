@@ -4,6 +4,7 @@ import { ProfileEngineError, type ProfileQuestions } from "../src/contracts/prof
 import { type DecisionRequest, type Environment } from "../src/contracts/decisions";
 import { evaluateProfile } from "../src/decisions/profile-engine";
 import { profileRegistry } from "../src/decisions/profile-registry";
+import { ProviderError } from "../src/providers/openrouter/decisions";
 import { taskAdmissionProfile } from "../src/profiles/kaseki/task-admission";
 import { validationRecoveryProfile } from "../src/profiles/kaseki/validation-recovery";
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
@@ -198,7 +199,10 @@ describe("profile evidence validation and projection", () => {
     });
     expect(Object.keys(state)).not.toContain("retry_authorized");
     expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, retry: true })).toThrow();
+    expect(validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "x".repeat(6_000) }).output).toHaveLength(6_000);
     expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "x".repeat(6_001) })).toThrow();
+    expect(validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "é".repeat(3_000) }).output).toHaveLength(3_000);
+    expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "é".repeat(3_001) })).toThrow();
   });
 
   it("rejects missing, unexpected, wrong-type, and out-of-scale profile answers", () => {
@@ -248,6 +252,22 @@ describe("shared profile engine", () => {
     await expect(evaluateProfile("validation_recovery_v1", validationRecoveryInput, { clientIdentity: "kaseki" }, { env, fetchImpl }))
       .rejects.toMatchObject({ code: "PROVIDER_UNAVAILABLE" });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("maps unexpected provider-call exceptions to retryable provider errors", async () => {
+    const requestDecision = async () => {
+      throw new Error("private provider runtime detail");
+    };
+    const error = await evaluateProfile(
+      "validation_recovery_v1",
+      validationRecoveryInput,
+      { clientIdentity: "kaseki" },
+      { env, requestDecision },
+    ).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({ code: "PROVIDER_UNAVAILABLE", retryable: true });
+    expect(String(error)).not.toContain("private provider runtime detail");
   });
 
   it("rejects profile evidence beyond its stricter cap before provider invocation", async () => {

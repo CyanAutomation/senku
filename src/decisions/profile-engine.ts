@@ -12,6 +12,7 @@ export interface ProfileEvaluationContext {
 export interface ProfileEngineDependencies {
   env: Environment;
   fetchImpl?: typeof fetch;
+  requestDecision?: typeof requestOpenRouterDecision;
 }
 
 function utf8Size(value: string): number {
@@ -63,10 +64,14 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
   const started = performance.now();
   let providerResult: Awaited<ReturnType<typeof requestOpenRouterDecision>>;
   try {
-    providerResult = await requestOpenRouterDecision(validation.value, config, dependencies.fetchImpl);
+    providerResult = await (dependencies.requestDecision ?? requestOpenRouterDecision)(
+      validation.value,
+      config,
+      dependencies.fetchImpl,
+    );
   } catch (error) {
     if (error instanceof ProviderError) throw error;
-    throw new ProfileEngineError("INVALID_PROFILE_OUTPUT");
+    throw new ProviderError("PROVIDER_UNAVAILABLE", true);
   }
 
   const durationMs = Math.max(0, Math.round(performance.now() - started));

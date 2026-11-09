@@ -5,6 +5,8 @@ import { allowedClientsForProfile, profileOwner } from "../../auth/permissions";
 import { jsonState, redactKasekiEvidence, requireOnlyKeys, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
 
 const PROFILE_ID = "validation_recovery_v1" as const;
+const MAX_FAILURE_OUTPUT_BYTES = 6_000;
+const MAX_FAILURE_OUTPUT_TAIL_CODE_UNITS = 5_000;
 
 const questions = {
   validation_failure_cause: {
@@ -46,8 +48,7 @@ function validateInput(value: unknown): ValidationRecoveryInput {
   if (!Number.isSafeInteger(root.exitCode) || (root.exitCode as number) < 0 || (root.exitCode as number) > 255) {
     throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   }
-  const output = requireString(root.output, 12_000, { allowEmpty: true });
-  if (output.length > 6_000) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  const output = requireString(root.output, MAX_FAILURE_OUTPUT_BYTES, { allowEmpty: true });
   return {
     command: requireString(root.command, 1_000),
     exitCode: root.exitCode as number,
@@ -75,7 +76,7 @@ export const validationRecoveryProfile: DecisionProfile<
     const safe = redactKasekiEvidence({
       command: input.command,
       exit_code: input.exitCode,
-      failure_output: input.output.slice(-5_000),
+      failure_output: input.output.slice(-MAX_FAILURE_OUTPUT_TAIL_CODE_UNITS),
     });
     return { state: jsonState(safe), questions };
   },
