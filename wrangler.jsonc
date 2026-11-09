@@ -20,9 +20,5 @@
       "enabled": true,
       "head_sampling_rate": 0.01
     }
-  },
-  "limits": {
-    "cpu_ms": 10,
-    "subrequests": 1
   }
 }
