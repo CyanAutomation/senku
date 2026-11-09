@@ -4,6 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-11-08",
   "workers_dev": true,
+  "preview_urls": false,
   "vars": {
     "JEV_MODEL": "~typesafe/jev-latest",
     "SENKU_PROVIDER_TIMEOUT_MS": "15000",
