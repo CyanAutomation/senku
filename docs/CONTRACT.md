@@ -146,7 +146,8 @@ Errors use the established envelope:
 | Malformed request, invalid profile input, or unsupported schema version | 400 | `INVALID_REQUEST` or `UNSUPPORTED_SCHEMA_VERSION` |
 | Missing or invalid bearer token | 401 | `UNAUTHENTICATED` |
 | Authenticated identity lacks permission | 403 | `FORBIDDEN` |
-| Unknown route or profile | 404 | `NOT_FOUND` |
+| Unknown route | 404 | `NOT_FOUND` |
+| Unknown or unauthorized profile ID | 403 | `FORBIDDEN` |
 | Request or profile evidence over its limit | 413 | `PAYLOAD_TOO_LARGE` |
 | Invalid service configuration | 503 | `NOT_CONFIGURED` |
 | Invalid provider response/profile output | 502 | `INVALID_PROVIDER_RESPONSE` |

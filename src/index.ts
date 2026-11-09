@@ -1,5 +1,5 @@
 import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
-import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity, type ProfileId } from "./auth/permissions";
+import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
 import { buildOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
@@ -276,6 +276,21 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
           return errorResponse(error, id);
         }
 
+        if (!canEvaluateProfile(profileId, authentication.clientId)) {
+          const error = new ApiError("FORBIDDEN");
+          logFailure(logger, {
+            requestId: id,
+            clientId: authentication.clientId,
+            error,
+            method: request.method,
+            path: logPath,
+            profileId,
+            workerDurationMs: elapsedMs(started),
+            event: "profile.request_failed",
+          });
+          return errorResponse(error, id);
+        }
+
         let profile;
         try {
           profile = profileRegistry.getProfile(profileId);
@@ -291,21 +306,6 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
             event: "profile.request_failed",
           });
           return errorResponse(apiError, id);
-        }
-
-        if (!canEvaluateProfile(profileId as ProfileId, authentication.clientId)) {
-          const error = new ApiError("FORBIDDEN");
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error,
-            method: request.method,
-            path: logPath,
-            profileId,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.request_failed",
-          });
-          return errorResponse(error, id);
         }
 
         if (profileDetailMatch) return jsonResponse(getPublicProfileContract(profileId));

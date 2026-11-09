@@ -158,7 +158,7 @@ describe("authenticated profile REST routes", () => {
     const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
     const worker = createWorker({ fetchImpl, logger: () => undefined });
     const cases = [
-      { path: "/v1/profiles/unknown_profile/evaluate", body: { schemaVersion: "1", input: {} }, status: 404, code: "NOT_FOUND" },
+      { path: "/v1/profiles/unknown_profile/evaluate", body: { schemaVersion: "1", input: {} }, status: 403, code: "FORBIDDEN" },
       { path: "/v1/profiles/Run-Operations/evaluate", body: { schemaVersion: "1", input: {} }, status: 400, code: "INVALID_REQUEST" },
       { path: "/v1/profiles/task_admission_v1/evaluate", body: { schemaVersion: "2", input: {} }, status: 400, code: "UNSUPPORTED_SCHEMA_VERSION" },
       { path: "/v1/profiles/task_admission_v1/evaluate", body: { schemaVersion: "1", input: { repoUrl: "file:///tmp/repo" } }, status: 400, code: "INVALID_REQUEST" },
@@ -248,9 +248,9 @@ describe("authenticated profile REST routes", () => {
 
     const pathMarker = "synthetic_bearer_token_0123456789abcdef";
     const unknownProfile = await worker.fetch(request(`/v1/profiles/${pathMarker}`, { token: KASEKI_TOKEN }), env);
-    expect(unknownProfile.status).toBe(404);
+    expect(unknownProfile.status).toBe(403);
     expect(JSON.stringify(logs)).not.toContain(pathMarker);
-    expect(logs.at(-1)).toMatchObject({ path: "/v1/profiles/{profileId}", errorCode: "NOT_FOUND" });
+    expect(logs.at(-1)).toMatchObject({ path: "/v1/profiles/{profileId}", errorCode: "FORBIDDEN" });
   });
 
   it("fails closed for duplicate or missing machine credentials", async () => {
