@@ -1,6 +1,6 @@
 import type { DecisionAnswer, DecisionQuestion } from "../../contracts/decisions";
-import type { AnswersFor, DecisionProfile } from "../../contracts/profiles";
-import { allowedClientsForProfile, profileOwner } from "../../auth/permissions";
+import type { AnswersFor, DecisionProfile, JsonSchema } from "../../contracts/profiles";
+import { profileOwner } from "../../auth/permissions";
 import { outputReviewV1Questions } from "./output-review-questions";
 import { ProfileEngineError } from "../../contracts/profiles";
 import { jsonState, requireEnum, requireNullableInteger, requireNullableString, requireOnlyKeys, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
@@ -12,6 +12,26 @@ const RUN_STATUSES = [
 ] as const;
 
 const questions = outputReviewV1Questions;
+
+export const OUTPUT_REVIEW_INPUT_SCHEMA: JsonSchema = {
+  type: "object",
+  required: ["canonicalRun", "summary"],
+  additionalProperties: false,
+  properties: {
+    canonicalRun: {
+      type: "object",
+      required: ["status", "failureClass", "exitCode", "changedFileCount"],
+      additionalProperties: false,
+      properties: {
+        status: { type: "string", enum: RUN_STATUSES },
+        failureClass: { type: ["string", "null"], minLength: 1, maxLength: 128, pattern: "\\S", "x-maxBytes": 128 },
+        exitCode: { type: ["integer", "null"], minimum: -1, maximum: 255 },
+        changedFileCount: { type: ["integer", "null"], minimum: 0, maximum: 1_000_000 },
+      },
+    },
+    summary: { type: ["string", "null"], maxLength: 2_000, "x-maxBytes": 8_000 },
+  },
+};
 
 export interface KasekiOutputReviewInput {
   canonicalRun: {
@@ -35,7 +55,7 @@ export function validateOutputReviewInput(value: unknown): KasekiOutputReviewInp
     canonicalRun: {
       status: requireEnum(run.status, RUN_STATUSES),
       failureClass: requireNullableString(run.failureClass, 128),
-      exitCode: requireNullableInteger(run.exitCode, 0, 255),
+      exitCode: requireNullableInteger(run.exitCode, -1, 255),
       changedFileCount: requireNullableInteger(run.changedFileCount, 0, 1_000_000),
     },
     summary: root.summary === null ? null : boundedSummary(root.summary),
@@ -44,7 +64,7 @@ export function validateOutputReviewInput(value: unknown): KasekiOutputReviewInp
 
 function boundedSummary(value: unknown): string {
   const summary = requireString(value, 8_000, { allowEmpty: true });
-  if (summary.length > 2_000) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  if (Array.from(summary).length > 2_000) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   return summary;
 }
 
@@ -74,9 +94,9 @@ export const kasekiOutputReviewV1Profile: DecisionProfile<
   description: "Assess the recorded Kaseki result summary against its canonical run status.",
   owner: profileOwner(PROFILE_ID),
   version: "1",
-  allowedClients: allowedClientsForProfile(PROFILE_ID),
   maxEvidenceBytes: 8 * 1024,
   questions,
+  inputSchema: OUTPUT_REVIEW_INPUT_SCHEMA,
   validateInput: validateOutputReviewInput,
   buildDecision(input) {
     return { state: buildState(input), questions };

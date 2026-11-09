@@ -1,8 +1,8 @@
 import type { DecisionAnswer, DecisionQuestion } from "../../contracts/decisions";
 import type { AnswersFor, DecisionProfile } from "../../contracts/profiles";
-import { allowedClientsForProfile, profileOwner } from "../../auth/permissions";
+import { profileOwner } from "../../auth/permissions";
 import { outputReviewV1Questions, recordedOutcomeQuestion } from "./output-review-questions";
-import { validateOutputReviewInput, type KasekiOutputReviewInput } from "./output-review-v1";
+import { OUTPUT_REVIEW_INPUT_SCHEMA, validateOutputReviewInput, type KasekiOutputReviewInput } from "./output-review-v1";
 import { jsonState, validateAnswersForQuestions } from "../validation";
 
 const PROFILE_ID = "kaseki_output_review_v2" as const;
@@ -26,9 +26,9 @@ export const kasekiOutputReviewV2Profile: DecisionProfile<
   description: "Score the recorded Kaseki result and how well it supports the canonical run outcome.",
   owner: profileOwner(PROFILE_ID),
   version: "2",
-  allowedClients: allowedClientsForProfile(PROFILE_ID),
   maxEvidenceBytes: 8 * 1024,
   questions,
+  inputSchema: OUTPUT_REVIEW_INPUT_SCHEMA,
   validateInput: validateOutputReviewInput,
   buildDecision(input) {
     return {
