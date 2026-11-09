@@ -2,7 +2,7 @@
 
 Senku is a stateless Cloudflare Worker that provides bounded, typed JEV decisions to [Kaseki-Agent](https://github.com/CyanAutomation/kaseki-agent) and [Soyuz](https://github.com/CyanAutomation/soyuz). Callers send evidence; Senku owns the questions and profile contracts. Results are advisory, and each consumer keeps its deterministic policy and execution controls.
 
-**Phase 2B is implemented in this branch.** Senku exposes authenticated profile evaluation, permission-filtered discovery, and a generated OpenAPI 3.1 document alongside the existing generic decision, health, and readiness endpoints. It has not been deployed. UTCP, the Soyuz Service Binding, and consumer migrations remain future work.
+**Phase 2C is implemented on this feature branch.** Senku exposes authenticated profile evaluation, permission-filtered REST and UTCP discovery, and identity-filtered OpenAPI 3.1. It has not been deployed.
 
 ## API
 
@@ -13,6 +13,7 @@ Senku is a stateless Cloudflare Worker that provides bounded, typed JEV decision
 | `GET` | `/v1/profiles` | Authenticated; returns only permitted profiles |
 | `GET` | `/v1/profiles/{profileId}` | Authenticated; public contract for a permitted profile |
 | `GET` | `/openapi.json` | Authenticated; OpenAPI filtered by caller permissions |
+| `GET` | `/utcp` | Authenticated; UTCP manual filtered by caller permissions |
 | `GET` | `/healthz` | Public liveness check |
 | `GET` | `/readyz` | Public configuration readiness check |
 
@@ -52,11 +53,14 @@ Configure two separate strong machine tokens: `SENKU_KASEKI_API_TOKEN` and `SENK
 
 Kaseki may call the generic endpoint and its two profiles. Soyuz may call its three profiles and cannot call generic decisions. Authenticated responses use `Cache-Control: no-store`. Senku does not enable CORS.
 
+`GET /utcp` uses the same bearer identity and central permission matrix. Kaseki discovers two profile tools; Soyuz discovers three. Every tool calls its existing profile REST route. The manual never exposes `POST /v1/decisions` or credentials. See [docs/UTCP.md](docs/UTCP.md) for client setup and body mapping.
+
 The current Worker uses bearer tokens. A future Service Binding can supply identity through a trusted server-side resolver at the HTTP boundary; it will still pass through the central profile permission policy. No Service Binding is configured in this phase.
 
 ## Runtime and safety
 
 - Native TypeScript and Web APIs; no persistent storage and no runtime framework.
+- UTCP SDK and HTTP client packages are development-only interoperability dependencies; they are not bundled into the Worker.
 - Fixed provider endpoint and the single model alias `~typesafe/jev-latest`.
 - One provider attempt per evaluation; no retries or fallback models.
 - Bounded requests and profile evidence; streamed provider response limit of 64 KiB.
@@ -66,7 +70,7 @@ The current Worker uses bearer tokens. A future Service Binding can supply ident
 - Kaseki can store `-1` when a process exit is unavailable. Soyuz signal-derived values such as `143` are preserved. Output-review profiles accept `-1..255` and reject values outside that range.
 - The dedicated OpenRouter key should have a provider-side spending limit. Senku does not claim that a limit is configured.
 
-The service targets Cloudflare Workers Free: 10 ms CPU, one outbound subrequest per evaluation, no database, and small bundles. Local timings are not production CPU measurements. No production deployment happens as part of Phase 2B.
+The service targets Cloudflare Workers Free: 10 ms CPU, one outbound subrequest per evaluation, no database, and small bundles. Local timings are not production CPU measurements. No production deployment happens as part of Phase 2C.
 
 ## Local development
 
@@ -82,6 +86,8 @@ npm run perf:smoke
 npm run build
 ```
 
+For local UTCP discovery, `.dev.vars.example` sets `SENKU_PUBLIC_BASE_URL=http://127.0.0.1:8787`. Start the Worker with `npm run dev -- --ip 127.0.0.1 --port 8787`.
+
 Routine tests mock the provider and do not incur provider charges. `npm run build` uses Wrangler's dry-run build and does not deploy. The live-provider smoke test is separate and opt-in; see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Documentation
@@ -89,6 +95,8 @@ Routine tests mock the provider and do not incur provider charges. `npm run buil
 - [REST and error contract](docs/CONTRACT.md)
 - [Profile contracts](docs/PROFILES.md)
 - [Development and operations](docs/DEVELOPMENT.md)
+- [UTCP discovery and client usage](docs/UTCP.md)
+- [Phase 2C decisions and measurements](docs/PHASE-2C-DECISIONS.md)
 - [Phase 2B decisions](docs/PHASE-2B-DECISIONS.md)
 - [Phase 2A decisions](docs/PHASE-2A-DECISIONS.md)
 
@@ -97,9 +105,9 @@ Routine tests mock the provider and do not incur provider charges. `npm run buil
 - [x] Phase 1.1 — Provider and generic API hardening
 - [x] Phase 2A — Internal profile registry, engine, and permissions
 - [x] Phase 2B — Authenticated profile REST API, discovery, OpenAPI, and contract hardening
-- [ ] Phase 2C — UTCP discovery, after validating the selected specification and client behavior
+- [x] Phase 2C — Permission-aware UTCP discovery, native HTTP invocation, and client interoperability
 - [ ] Phase 3 — Soyuz Service Binding and consumer integration
 - [ ] Phase 4 — Kaseki remote `DecisionService` adapter and staged migration
 - [ ] Follow-on — Calibration against replayable evaluations and outcomes
 
-Neither MCP nor UTCP endpoints, consumer adapters, persistent histories, dashboard UI, or automatic production deployment are part of this implementation.
+Senku UTCP describes bounded decision evaluations. Future Soyuz UTCP will describe Soyuz-owned run-management operations in that separate repository. Neither service needs an MCP-compatible proxy for native UTCP invocation. Consumer adapters, persistent histories, dashboard UI, and automatic production deployment remain deferred.

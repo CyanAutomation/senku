@@ -11,6 +11,7 @@ Senku exposes a versioned REST API. All JSON responses use `Cache-Control: no-st
 | `GET` | `/v1/profiles` | Bearer authenticated. Lists only profiles the identity may invoke. |
 | `GET` | `/v1/profiles/{profileId}` | Bearer authenticated. Returns the permitted profile's input and output JSON Schemas and limits. A known but forbidden profile returns 403 without its details. |
 | `GET` | `/openapi.json` | Bearer authenticated. Returns a deterministic OpenAPI 3.1 document filtered to the caller's allowed profiles. |
+| `GET` | `/utcp` | Bearer authenticated. Returns the UTCP 1.1 manual filtered to the caller's allowed profiles. |
 | `GET` | `/healthz` | Public liveness response; no configuration or provider call. |
 | `GET` | `/readyz` | Public readiness response; no provider call or secret disclosure. |
 
@@ -103,7 +104,9 @@ The server validates evidence, builds the fixed profile questions, makes exactly
 
 The list is filtered by the central permission policy. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
 
-`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes. The authenticated document includes only the profile contracts available to that identity. Kaseki's document includes `POST /v1/decisions`; Soyuz's does not advertise an operation it cannot use. The Worker has automated structural, route, reference, permission, and schema/runtime parity checks.
+`GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. Senku does not expose the generic `/v1/decisions` endpoint in the manual. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
+
+`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes, including `/utcp`. The authenticated document includes only the profile contracts and UTCP tools available to that identity. Kaseki's document includes `POST /v1/decisions`; Soyuz's does not advertise an operation it cannot use. Structural, route, reference, permission, schema/runtime parity, and independent Redocly OpenAPI validation run offline.
 
 ## Generic decisions
 
@@ -162,4 +165,4 @@ Provider errors preserve their retryable classification. No automatic retry is p
 
 Senku always sends one request to the fixed OpenRouter Decisions API endpoint and uses only `~typesafe/jev-latest`. It returns the resolved model identifier from OpenRouter. Model selection, endpoint, identity, question map, and provider credential are never caller-controlled. The dedicated Senku OpenRouter key should have a provider-side spending limit; its configuration has not been verified here.
 
-The Worker remains stateless and uses one provider subrequest per evaluation. `/readyz` checks both machine tokens, distinctness, provider configuration, model alias, and timeout range without contacting OpenRouter. Production deployment, UTCP/MCP routes, Service Binding setup, and consumer migrations are deferred.
+The Worker remains stateless and uses one provider subrequest per evaluation. `/readyz` checks both machine tokens, distinctness, the trusted UTCP public origin, provider configuration, model alias, and timeout range without contacting OpenRouter. Production deployment, MCP, Service Binding setup, and consumer migrations are deferred.

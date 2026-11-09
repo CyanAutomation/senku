@@ -1,5 +1,6 @@
 OPENROUTER_API_KEY=replace-with-local-openrouter-api-key
 SENKU_KASEKI_API_TOKEN=replace-with-a-long-random-local-token
 SENKU_SOYUZ_API_TOKEN=replace-with-a-different-long-random-local-token
+SENKU_PUBLIC_BASE_URL=http://127.0.0.1:8787
 JEV_MODEL=~typesafe/jev-latest
 SENKU_PROVIDER_TIMEOUT_MS=15000
