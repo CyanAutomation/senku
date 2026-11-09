@@ -88,4 +88,4 @@ Changing required input, question meaning, answer IDs, labels, score scale, or r
 
 ## Generic endpoint and deferred work
 
-`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access, and this endpoint is not exposed as a UTCP tool. Senku UTCP describes decision evaluations; future Soyuz UTCP belongs in the Soyuz repository and will describe run-management operations. MCP, Service Binding setup, consumer adapters, storage/history, retries, fallback models, and dashboard changes remain deferred.
+`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access, and this endpoint is not exposed as a UTCP tool. Senku UTCP describes decision evaluations; Soyuz UTCP belongs in the Soyuz repository and describes run-management operations. Senku does not add persistence, retries, or fallback models. Phase 2D deployment status is tracked separately.
