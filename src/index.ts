@@ -16,6 +16,7 @@ import {
   ProviderError,
   requestOpenRouterDecision,
   resolveProviderConfig,
+  type ProviderDiagnosticCode,
 } from "./providers/openrouter/decisions";
 import { consoleLogger, safeLog, type Logger } from "./observability/log";
 
@@ -126,6 +127,7 @@ function logFailure(
     providerDurationMs?: number;
     attemptCount?: number;
     profileId?: string;
+    providerDiagnosticCode?: ProviderDiagnosticCode;
     event?: string;
   },
 ): void {
@@ -140,6 +142,7 @@ function logFailure(
     requestBytes: details.requestBytes,
     questionCount: details.questionCount,
     providerDurationMs: details.providerDurationMs,
+    providerDiagnosticCode: details.providerDiagnosticCode,
     workerDurationMs: details.workerDurationMs,
     attemptCount: details.attemptCount ?? 0,
     profileId: details.profileId,
@@ -200,6 +203,12 @@ function profileApiError(error: unknown): ApiError {
     }
   }
   return new ApiError("INTERNAL_ERROR");
+}
+
+function profileProviderDiagnosticCode(error: unknown): ProviderDiagnosticCode | undefined {
+  if (error instanceof ProviderError) return error.diagnosticCode;
+  if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") return "profile_output_invalid";
+  return undefined;
 }
 
 function profileInputFromEnvelope(value: unknown): unknown {
@@ -448,6 +457,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
             profileId,
             workerDurationMs: elapsedMs(started),
             event: "profile.evaluation_failed",
+            providerDiagnosticCode: profileProviderDiagnosticCode(error),
           });
           return errorResponse(apiError, id);
         }
@@ -552,6 +562,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
               attemptCount: providerAttempts,
               workerDurationMs: elapsedMs(started),
               providerDurationMs,
+              providerDiagnosticCode: error.diagnosticCode,
             });
             return errorResponse(apiError, id);
           }
