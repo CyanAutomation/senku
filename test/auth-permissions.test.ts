@@ -10,6 +10,7 @@ import { DecisionProfileRegistry, profileRegistry } from "../src/decisions/profi
 import { taskAdmissionProfile } from "../src/profiles/kaseki/task-admission";
 
 const validToken = "senku-test-machine-token-0123456789abcdef";
+const validSoyuzToken = "senku-soyuz-machine-token-0123456789abcdef";
 
 describe("machine bearer configuration", () => {
   it("requires a non-empty printable token with at least 32 characters and bounded bytes", () => {
@@ -20,12 +21,17 @@ describe("machine bearer configuration", () => {
   });
 
   it("authenticates only the exact strong token and rejects malformed headers", async () => {
-    const env = { SENKU_KASEKI_API_TOKEN: validToken };
+    const env = { SENKU_KASEKI_API_TOKEN: validToken, SENKU_SOYUZ_API_TOKEN: validSoyuzToken };
     expect(await authenticateBearer(`Bearer ${validToken}`, env)).toEqual({ authenticated: true, clientId: "kaseki" });
-    for (const header of [null, "Basic abc", "Bearer", "Bearer short", `Bearer ${validToken} extra`, `Bearer ${validToken} `]) {
+    expect(await authenticateBearer(`Bearer ${validSoyuzToken}`, env)).toEqual({ authenticated: true, clientId: "soyuz" });
+    for (const header of [null, "Basic abc", "Bearer", "Bearer short", `Bearer ${"x".repeat(40)}`, `Bearer ${validToken} extra`, `Bearer ${validToken} `]) {
       expect(await authenticateBearer(header, env)).toEqual({ authenticated: false, reason: "invalid_credentials" });
     }
-    expect(await authenticateBearer(`Bearer ${validToken}`, { SENKU_KASEKI_API_TOKEN: `${validToken} ` }))
+    expect(await authenticateBearer(`Bearer ${validToken}`, { SENKU_KASEKI_API_TOKEN: `${validToken} `, SENKU_SOYUZ_API_TOKEN: validSoyuzToken }))
+      .toEqual({ authenticated: false, reason: "not_configured" });
+    expect(await authenticateBearer(`Bearer ${validToken}`, { SENKU_KASEKI_API_TOKEN: validToken }))
+      .toEqual({ authenticated: false, reason: "not_configured" });
+    expect(await authenticateBearer(`Bearer ${validToken}`, { SENKU_KASEKI_API_TOKEN: validToken, SENKU_SOYUZ_API_TOKEN: validToken }))
       .toEqual({ authenticated: false, reason: "not_configured" });
   });
 });
@@ -60,6 +66,14 @@ describe("client permissions and registry", () => {
     } catch (error) {
       expect(error).toBeInstanceOf(ProfileEngineError);
       expect((error as ProfileEngineError).code).toBe("DUPLICATE_PROFILE");
+    }
+
+    try {
+      new DecisionProfileRegistry([{ ...taskAdmissionProfile, owner: "soyuz" }]);
+      throw new Error("Expected mismatched profile owner rejection.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProfileEngineError);
+      expect((error as ProfileEngineError).code).toBe("INVALID_PROFILE_CONFIGURATION");
     }
   });
 });

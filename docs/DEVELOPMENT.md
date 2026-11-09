@@ -1,92 +1,104 @@
-# Development
+# Development and operations
 
-## Prerequisites
+## Prerequisites and local setup
 
 - Node.js 26 and npm.
 - Git.
-- No OpenRouter or Cloudflare account is needed for the offline test suite.
+- No Cloudflare account or OpenRouter credential is needed for typecheck, routine tests, the performance smoke test, or dry-run build.
 
 The Worker uses native Fetch, Request, Response, AbortController, Web Crypto, TextEncoder, and TextDecoder APIs. It does not enable Node.js compatibility in Cloudflare.
 
-## Local setup
+```sh
+nvm use
+npm ci
+cp .dev.vars.example .dev.vars
+```
 
-From the repository root:
+`.dev.vars` is ignored by Git. For authenticated local Worker requests, set distinct placeholder or real local values for both `SENKU_KASEKI_API_TOKEN` and `SENKU_SOYUZ_API_TOKEN`. Each must be 32–1,024 printable ASCII characters with no whitespace. Generate them independently with a cryptographically secure source, for example:
 
-    nvm use
-    npm ci
-    cp .dev.vars.example .dev.vars
+```sh
+openssl rand -base64 32
+```
 
-Use placeholders only until you deliberately configure a local provider call. `.dev.vars` is ignored by Git. For local Worker use, it can hold `OPENROUTER_API_KEY` and `SENKU_KASEKI_API_TOKEN`; do not commit it.
-
-Generate a strong Kaseki machine token with at least 256 bits of randomness, for example:
-
-    openssl rand -base64 32
-
-The configured token must be 32–1,024 printable ASCII characters with no whitespace. Do not paste the generated value into source code, documentation, CI variables, or Wrangler text variables.
+Do not commit real credentials or paste them into documentation, shell history, source, or Wrangler text variables.
 
 ## Commands
 
-    npm run dev
-    npm run typecheck
-    npm test
-    npm run perf:smoke
-    npm run build
+```sh
+npm run dev
+npm run typecheck
+npm test
+npm run perf:smoke
+npm run build
+```
 
-`npm run perf:smoke` exercises small, typical, upper-bound generic requests and a representative profile evaluation in the local Workers runtime. It reports local elapsed wall-clock time, not Cloudflare billed CPU. `npm run build` uses Wrangler's dry-run deployment bundle path and does not deploy.
+The routine test suite uses mocked provider responses and does not incur provider charges. `npm run perf:smoke` exercises the full Worker HTTP path for all five profiles, including large evidence inputs. It reports request size, projected evidence bytes, question count, provider attempts, and local elapsed wall time. It is not a measurement of billed Cloudflare CPU. `npm run build` performs Wrangler's dry-run build, does not deploy, and emits the bundle whose size is recorded separately in the validation report.
+
+The generated OpenAPI document is available at `/openapi.json` when a Worker is running. That route requires one of the configured machine credentials and shows only the authenticated identity's profiles.
 
 ### Optional live provider smoke test
 
-This is a separate, paid inference request. It is excluded from `npm test` and does not run in CI. Run it only when an operator explicitly wants to verify live OpenRouter compatibility:
+The live test is a separate paid inference request. It is excluded from `npm test` and routine CI. Run it only when an operator explicitly wants to verify live OpenRouter compatibility:
 
-    OPENROUTER_API_KEY='your-existing-senku-key' npm run smoke:provider
+```sh
+OPENROUTER_API_KEY='<existing Senku OpenRouter key>' npm run smoke:provider
+```
 
-The test sends one small synthetic decision using `~typesafe/jev-latest` and the same provider validation path as the Worker. It prints only status, resolved model, duration, and returned usage. It has no automatic retry. If you already have a local `.dev.vars`, you can load it into the current shell and run the command:
-
-    set -a
-    source .dev.vars
-    set +a
-    npm run smoke:provider
-
-The live test fails clearly when `OPENROUTER_API_KEY` is absent. Never put the key value in a command checked into source control.
-
-## Tests and runtime
-
-The default Vitest configuration uses Cloudflare's `@cloudflare/vitest-plugin` so the Worker and routine tests run in local workerd. Provider tests use an injected fetch function and synthetic responses; routine tests need no provider credentials and make no paid requests.
-
-The separate `vitest.provider-smoke.config.ts` includes only the opt-in live smoke test. Its file is not matched by the normal `npm test` include pattern.
+It sends one small synthetic decision using `~typesafe/jev-latest`, reports only status, resolved model, duration, and returned usage, and does not retry. Routine CI never makes provider calls.
 
 ## Environment and secrets
 
-| Variable | Local source | Purpose |
+| Variable | Source | Purpose |
 | --- | --- | --- |
-| `OPENROUTER_API_KEY` | Secret in `.dev.vars`; Worker secret after deployment | Existing dedicated Senku OpenRouter credential |
-| `SENKU_KASEKI_API_TOKEN` | Secret in `.dev.vars`; Worker secret after deployment | Strong bearer token for Kaseki's generic endpoint |
-| `JEV_MODEL` | Wrangler variable; optional local value | Must be exactly `~typesafe/jev-latest`; omission selects the same alias |
-| `SENKU_PROVIDER_TIMEOUT_MS` | Wrangler variable; optional local override | Provider timeout from 1,000 to 30,000 ms; default is 15,000 |
+| `OPENROUTER_API_KEY` | Local `.dev.vars`; Worker secret | Dedicated Senku provider credential; separate from machine tokens |
+| `SENKU_KASEKI_API_TOKEN` | Local `.dev.vars`; Worker secret | Kaseki bearer identity and generic/profile permission |
+| `SENKU_SOYUZ_API_TOKEN` | Local `.dev.vars`; Worker secret | Separate Soyuz bearer identity and profile permission |
+| `JEV_MODEL` | Wrangler variable; optional local value | Must be exactly `~typesafe/jev-latest`; omission selects that alias |
+| `SENKU_PROVIDER_TIMEOUT_MS` | Wrangler variable; optional local override | 1,000–30,000 ms; default is 15,000 ms |
 
-Every request uses the fixed alias `~typesafe/jev-latest`. The alias may resolve to a different version over time; the provider-resolved model is returned and recorded as safe metadata. A caller cannot provide a model name.
+Both machine tokens are required, must satisfy the strong-token format, and must differ. Any missing, invalid, or duplicate token configuration fails closed and makes `/readyz` return `not_ready`. A credential never identifies a caller through the request body, query string, or identity header. No CORS headers are enabled.
 
-For a deployed Worker, install the existing credentials as secrets:
+For a future deployed Worker, install secrets interactively:
 
-    npx wrangler secret put OPENROUTER_API_KEY
-    npx wrangler secret put SENKU_KASEKI_API_TOKEN
+```sh
+npx wrangler secret put OPENROUTER_API_KEY
+npx wrangler secret put SENKU_KASEKI_API_TOKEN
+npx wrangler secret put SENKU_SOYUZ_API_TOKEN
+```
 
-The secret values are entered interactively. The OpenRouter key's presence in an account does not mean it has been installed in local, CI, or deployed configuration. Do not add the actual key to this repository, GitHub Actions, `wrangler.jsonc`, or `wrangler.toml`.
+No production deployment is part of Phase 2B. Never run `npm run deploy` as part of routine validation.
 
-### OpenRouter spending control
+The model alias remains `~typesafe/jev-latest`; Senku returns the resolved provider model identifier. There is one provider request per evaluation, no retry, no fallback, no per-profile model, and one allowed provider subrequest.
 
-Set a credit limit and reset period on the dedicated Senku OpenRouter API key in the OpenRouter key settings or via the Management API. The key limit is the reliable provider-side aggregate cap for inference made with that key. Senku does not claim that a cap has been set.
+## Example requests
 
-To verify a configured key limit, inspect the key in OpenRouter or call `GET https://openrouter.ai/api/v1/key` with the dedicated key. Confirm the returned `limit`, `limit_remaining`, and `usage` fields. Do not put a Management API key in Senku; it is not needed for inference.
+Use placeholder credentials and a sanitized profile input:
 
-Reference: [Create an API key with a spending limit](https://openrouter.ai/docs/api/api-reference/api-keys/create-keys), [get current key usage](https://openrouter.ai/docs/api/api-reference/api-keys/get-current-key).
+```sh
+curl http://127.0.0.1:8787/v1/profiles \
+  -H 'Authorization: Bearer <SENKU_KASEKI_API_TOKEN>'
 
-## Deployment setup for a later release
+curl http://127.0.0.1:8787/v1/profiles/task_admission_v1/evaluate \
+  -H 'Authorization: Bearer <SENKU_KASEKI_API_TOKEN>' \
+  -H 'Content-Type: application/json' \
+  --data '{"schemaVersion":"1","input":{"repoUrl":"https://example.com/repo","taskPrompt":"Add an API endpoint."}}'
 
-No Cloudflare account, hostname, production secret, or deployment is assumed or configured by this implementation. The planned `workers.dev` hostname may not exist yet. When deployment is separately scheduled:
+curl http://127.0.0.1:8787/openapi.json \
+  -H 'Authorization: Bearer <SENKU_SOYUZ_API_TOKEN>'
+```
 
-1. Confirm the Cloudflare account and worker name, and configure a custom hostname only if it exists and is intended for Senku.
-2. Authenticate Wrangler in the intended account.
-3. Set the two secrets with the Wrangler commands above.
-4. Confirm the exact `JEV_MODEL` alias and provider timeout in Wrangler configuration.
-5. Run typecheck, offline tests, the dry-run build, and any explicitly requested live smoke test. Use `npm run deploy` only when a production deployment is separately approved.
+The Soyuz credential cannot call the generic `/v1/decisions` route or inspect Kaseki profile contracts. Kaseki cannot inspect or invoke Soyuz profiles.
+
+## Spending control
+
+The dedicated Senku OpenRouter API key should have a provider-side spending limit. This report does not claim that a limit is configured. Check the key in OpenRouter before any opt-in live smoke test; do not use a Management API key in Senku.
+
+## Cloudflare Free-plan constraints
+
+Senku remains stateless with no D1, KV, R2, Queue, or Durable Object. It uses one outbound provider subrequest per evaluation, fixed URL/model, bounded payloads, and no automatic retries. The Wrangler configuration retains a 10 ms CPU limit. Local performance results are useful for relative comparisons but do not establish production CPU usage; measure deployed CPU only after a separate deployment decision.
+
+## CI and future deployment
+
+CI runs typecheck, tests with mocked provider responses, and Wrangler's dry-run build. No live provider inference runs in CI. Before a future deployment, configure the two distinct machine secrets and the OpenRouter secret in the intended Cloudflare account, verify `/readyz`, inspect the OpenAPI document using each identity, and confirm the provider-side spending limit.
+
+The future Soyuz Service Binding is a transport choice. A trusted server-derived identity resolver can attach Soyuz identity at the HTTP boundary; profile permissions remain checked by the same central policy. Binding setup and consumer migrations are deferred.
