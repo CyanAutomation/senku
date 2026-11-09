@@ -1,8 +1,9 @@
 import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
 import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
-import { buildOpenApiDocument } from "./api/openapi";
+import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
+import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { validateDecisionRequest } from "./contracts/validation";
 import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
 import { ProfileEngineError } from "./contracts/profiles";
@@ -21,12 +22,18 @@ import { consoleLogger, safeLog, type Logger } from "./observability/log";
 export interface WorkerDependencies {
   fetchImpl?: typeof fetch;
   logger?: Logger;
+  /** Test seam for mapping manual-generation failures through the Worker error contract. */
+  serializeUtcpManual?: typeof serializeUtcpManual;
   /** Trusted internal identity seam for future server-side callers; never populated from request data. */
   resolveIdentity?: (request: Request, env: Environment) => Promise<AuthenticationResult>;
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
+  return serializedJsonResponse(JSON.stringify(value), status);
+}
+
+function serializedJsonResponse(value: string, status = 200): Response {
+  return new Response(value, {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -51,6 +58,7 @@ function timeoutIsStructurallyValid(env: Environment): boolean {
 
 function ready(env: Environment): boolean {
   return areMachineTokenCredentialsDistinct(env)
+    && trustedSenkuOrigin(env.SENKU_PUBLIC_BASE_URL) !== null
     && resolveProviderConfig(env).ok
     && timeoutIsStructurallyValid(env);
 }
@@ -138,6 +146,29 @@ function logFailure(
   });
 }
 
+function internalRouteFailure(
+  logger: Logger,
+  details: {
+    requestId: string;
+    clientId: ClientIdentity;
+    request: Request;
+    path: string;
+    started: number;
+  },
+): Response {
+  const error = new ApiError("INTERNAL_ERROR");
+  logFailure(logger, {
+    requestId: details.requestId,
+    clientId: details.clientId,
+    error,
+    method: details.request.method,
+    path: details.path,
+    workerDurationMs: elapsedMs(details.started),
+    event: "profile.request_failed",
+  });
+  return errorResponse(error, details.requestId);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -192,6 +223,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
 } {
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const logger = dependencies.logger ?? consoleLogger;
+  const serializeManual = dependencies.serializeUtcpManual ?? serializeUtcpManual;
   const resolveIdentity = dependencies.resolveIdentity
     ?? ((request: Request, env: Environment) => authenticateBearer(request.headers.get("authorization"), env));
 
@@ -226,12 +258,15 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
       const profileDetailMatch = /^\/v1\/profiles\/([^/]+)$/.exec(url.pathname);
       const isProfileList = url.pathname === "/v1/profiles";
       const isOpenApi = url.pathname === "/openapi.json";
-      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi) {
+      const isUtcp = url.pathname === "/utcp";
+      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi || isUtcp) {
         const expectedMethod = profileEvaluationMatch ? "POST" : "GET";
         const logPath = isProfileList
           ? "/v1/profiles"
           : isOpenApi
             ? "/openapi.json"
+            : isUtcp
+              ? "/utcp"
             : profileEvaluationMatch
               ? "/v1/profiles/{profileId}/evaluate"
               : "/v1/profiles/{profileId}";
@@ -259,7 +294,35 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         if (isProfileList) {
           return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
         }
-        if (isOpenApi) return jsonResponse(buildOpenApiDocument(authentication.clientId));
+        if (isOpenApi) {
+          try {
+            return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
+          } catch {
+            return internalRouteFailure(logger, {
+              requestId: id,
+              clientId: authentication.clientId,
+              request,
+              path: logPath,
+              started,
+            });
+          }
+        }
+        if (isUtcp) {
+          try {
+            const manual = serializeManual(authentication.clientId, env.SENKU_PUBLIC_BASE_URL);
+            return manual
+              ? serializedJsonResponse(manual)
+              : errorResponse(new ApiError("NOT_CONFIGURED"), id);
+          } catch {
+            return internalRouteFailure(logger, {
+              requestId: id,
+              clientId: authentication.clientId,
+              request,
+              path: logPath,
+              started,
+            });
+          }
+        }
 
         const profileId = profileIdFromPath((profileDetailMatch ?? profileEvaluationMatch)![1]);
         if (!profileId) {

@@ -2,7 +2,15 @@ import { ERROR_CODES, LIMITS, SCHEMA_VERSION } from "../contracts/decisions";
 import type { AnyDecisionProfile, JsonSchema } from "../contracts/profiles";
 import { canUseGenericDecisions, type ClientIdentity } from "../auth/permissions";
 import { profileRegistry } from "../decisions/profile-registry";
-import { canonicalAnswerSchema, listPublicProfiles, profileAnswersSchema, profileOutputSchema } from "./profile-contracts";
+import { utcpManualResponseSchema } from "./utcp";
+import {
+  canonicalAnswerSchema,
+  listPublicProfiles,
+  profileAnswersSchema,
+  profileEvaluationRequestSchema,
+  profileEvaluationResponseSchema,
+  profileOutputSchema,
+} from "./profile-contracts";
 
 const ref = (name: string): JsonSchema => ({ $ref: `#/components/schemas/${name}` });
 const inputName = (id: string): string => `Profile_${id}_Input`;
@@ -32,28 +40,6 @@ function commonErrors(statuses: readonly number[]): Record<string, unknown> {
   return Object.fromEntries(statuses.map((status) => [String(status), response(ref("ErrorResponse"), descriptions[status])]));
 }
 
-function profileResponseSchema(profile: AnyDecisionProfile): JsonSchema {
-  return {
-    type: "object",
-    required: ["schemaVersion", "requestId", "status", "profileId", "profileVersion", "provider", "model", "answers", "result", "durationMs", "attemptCount"],
-    additionalProperties: false,
-    properties: {
-      schemaVersion: { type: "string", const: SCHEMA_VERSION },
-      requestId: { type: "string", pattern: "^dec-" },
-      status: { type: "string", const: "completed" },
-      profileId: { type: "string", const: profile.id },
-      profileVersion: { type: "string", const: profile.version },
-      provider: { type: "string", const: "jev" },
-      model: { type: "string", minLength: 1, maxLength: 200, description: "Resolved model identifier returned by OpenRouter." },
-      answers: ref(answerName(profile.id)),
-      result: ref(answerName(profile.id)),
-      usage: ref("ProviderUsage"),
-      durationMs: { type: "integer", minimum: 0 },
-      attemptCount: { type: "integer", const: 1 },
-    },
-  };
-}
-
 function profileContractSchema(id: string): JsonSchema {
   return {
     type: "object",
@@ -81,7 +67,7 @@ function profileContractSchema(id: string): JsonSchema {
   };
 }
 
-function buildComponents(profiles: AnyDecisionProfile[]): Record<string, unknown> {
+function buildComponents(profiles: AnyDecisionProfile[], identity: ClientIdentity): Record<string, unknown> {
   const schemas: Record<string, JsonSchema> = {
     JsonValue: {
       anyOf: [
@@ -164,6 +150,7 @@ function buildComponents(profiles: AnyDecisionProfile[]): Record<string, unknown
     HealthResponse: { type: "object", required: ["status"], additionalProperties: false, properties: { status: { type: "string", const: "ok" } } },
     ReadyResponse: { type: "object", required: ["status"], additionalProperties: false, properties: { status: { type: "string", enum: ["ready", "not_ready"] } } },
     OpenApiDocument: { type: "object", required: ["openapi", "info", "paths", "components"], additionalProperties: true },
+    UtcpManual: utcpManualResponseSchema(identity),
   };
 
   schemas.AgentStageSettings = {
@@ -175,11 +162,8 @@ function buildComponents(profiles: AnyDecisionProfile[]): Record<string, unknown
   for (const profile of profiles) {
     schemas[inputName(profile.id)] = profile.inputSchema;
     schemas[answerName(profile.id)] = profileAnswersSchema(profile);
-    schemas[evaluationRequestName(profile.id)] = {
-      type: "object", required: ["schemaVersion", "input"], additionalProperties: false,
-      properties: { schemaVersion: { type: "string", const: SCHEMA_VERSION }, input: ref(inputName(profile.id)) },
-    };
-    schemas[evaluationResponseName(profile.id)] = profileResponseSchema(profile);
+    schemas[evaluationRequestName(profile.id)] = profileEvaluationRequestSchema(profile, ref(inputName(profile.id)));
+    schemas[evaluationResponseName(profile.id)] = profileEvaluationResponseSchema(profile, ref(answerName(profile.id)));
     schemas[contractName(profile.id)] = profileContractSchema(profile.id);
   }
   return { securitySchemes: { BearerAuth: { type: "http", scheme: "bearer", bearerFormat: "opaque", description: "Use the identity-specific Senku machine token." } }, schemas };
@@ -189,11 +173,12 @@ function profileIdsParameter(ids: string[]): Record<string, unknown> {
   return { name: "profileId", in: "path", required: true, schema: { type: "string", enum: ids } };
 }
 
-export function buildOpenApiDocument(identity: ClientIdentity): Record<string, unknown> {
+function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown> {
   const publicProfiles = listPublicProfiles(identity);
   const profiles = publicProfiles.map(({ id }) => profileRegistry.getProfile(id));
   const profileIds = profiles.map((profile) => profile.id);
-  const schemas = buildComponents(profiles).schemas as Record<string, JsonSchema>;
+  const components = buildComponents(profiles, identity);
+  const schemas = components.schemas as Record<string, JsonSchema>;
   const profileContractRefs = profiles.map((profile) => ref(contractName(profile.id)));
   const profileResponseRefs = profiles.map((profile) => ref(evaluationResponseName(profile.id)));
   const profileRequestRefs = profiles.map((profile) => ref(evaluationRequestName(profile.id)));
@@ -234,6 +219,17 @@ export function buildOpenApiDocument(identity: ClientIdentity): Record<string, u
         responses: { "200": response(ref("OpenApiDocument"), "OpenAPI 3.1 document filtered to the authenticated identity."), ...commonErrors([401, 405, 500, 503]) },
       },
     },
+    "/utcp": {
+      get: {
+        operationId: "getPermissionFilteredUtcpManual",
+        summary: "Discover this identity's permitted Senku decision tools",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          "200": response(ref("UtcpManual"), "UTCP 1.1 manual containing only profiles permitted for the authenticated identity."),
+          ...commonErrors([401, 405, 500, 503]),
+        },
+      },
+    },
     "/healthz": {
       get: { operationId: "healthCheck", summary: "Check worker liveness", security: [], responses: { "200": response(ref("HealthResponse"), "Worker is running."), ...commonErrors([405]) } },
     },
@@ -267,7 +263,35 @@ export function buildOpenApiDocument(identity: ClientIdentity): Record<string, u
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
     security: [{ BearerAuth: [] }],
     paths,
-    components: buildComponents(profiles),
+    components,
     "x-profileContracts": profileSchemas,
   };
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+const documentCache = new Map<ClientIdentity, { document: Record<string, unknown>; serialized: string }>();
+
+function getOpenApiDocument(identity: ClientIdentity): { document: Record<string, unknown>; serialized: string } {
+  let entry = documentCache.get(identity);
+  if (!entry) {
+    const document = deepFreeze(createOpenApiDocument(identity));
+    entry = { document, serialized: JSON.stringify(document) };
+    documentCache.set(identity, entry);
+  }
+  return entry;
+}
+
+export function buildOpenApiDocument(identity: ClientIdentity): Record<string, unknown> {
+  return getOpenApiDocument(identity).document;
+}
+
+export function serializeOpenApiDocument(identity: ClientIdentity): string {
+  return getOpenApiDocument(identity).serialized;
 }

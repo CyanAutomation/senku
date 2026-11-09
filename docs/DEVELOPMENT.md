@@ -28,13 +28,16 @@ Do not commit real credentials or paste them into documentation, shell history, 
 npm run dev
 npm run typecheck
 npm test
+npm run validate:openapi
 npm run perf:smoke
 npm run build
 ```
 
-The routine test suite uses mocked provider responses and does not incur provider charges. `npm run perf:smoke` exercises the full Worker HTTP path for all five profiles, including large evidence inputs. It reports request size, projected evidence bytes, question count, provider attempts, and local elapsed wall time. It is not a measurement of billed Cloudflare CPU. `npm run build` performs Wrangler's dry-run build, does not deploy, and emits the bundle whose size is recorded separately in the validation report.
+The routine test suite uses mocked provider responses and does not incur provider charges. `npm run validate:openapi` independently checks both permission-filtered OpenAPI 3.1 documents with Redocly; `npm test` runs it automatically after the Worker tests. `npm run perf:smoke` exercises discovery, OpenAPI serialization, profile contracts, all five profile HTTP paths, and the official UTCP client with mocked provider responses. It reports generated sizes, request/evidence sizes, provider attempts, and local elapsed wall time. It is not a measurement of billed Cloudflare CPU. `npm run build` performs Wrangler's dry-run build, does not deploy, and emits the bundle whose size is recorded in [PHASE-2C-DECISIONS.md](PHASE-2C-DECISIONS.md).
 
 The generated OpenAPI document is available at `/openapi.json` when a Worker is running. That route requires one of the configured machine credentials and shows only the authenticated identity's profiles.
+
+The UTCP manual is available at `/utcp` and uses the same identity filter. Configure `SENKU_PUBLIC_BASE_URL` to the trusted public origin advertised by the manual. The local example uses `http://127.0.0.1:8787`; production requires HTTPS. The Worker does not infer this value from request Host headers. See [UTCP.md](UTCP.md) for the official client example and complete envelope mapping.
 
 ### Optional live provider smoke test
 
@@ -53,6 +56,7 @@ It sends one small synthetic decision using `~typesafe/jev-latest`, reports only
 | `OPENROUTER_API_KEY` | Local `.dev.vars`; Worker secret | Dedicated Senku provider credential; separate from machine tokens |
 | `SENKU_KASEKI_API_TOKEN` | Local `.dev.vars`; Worker secret | Kaseki bearer identity and generic/profile permission |
 | `SENKU_SOYUZ_API_TOKEN` | Local `.dev.vars`; Worker secret | Separate Soyuz bearer identity and profile permission |
+| `SENKU_PUBLIC_BASE_URL` | Wrangler variable; local `.dev.vars` override | Trusted origin used for absolute UTCP tool URLs; HTTPS except loopback HTTP |
 | `JEV_MODEL` | Wrangler variable; optional local value | Must be exactly `~typesafe/jev-latest`; omission selects that alias |
 | `SENKU_PROVIDER_TIMEOUT_MS` | Wrangler variable; optional local override | 1,000–30,000 ms; default is 15,000 ms |
 
@@ -66,7 +70,7 @@ npx wrangler secret put SENKU_KASEKI_API_TOKEN
 npx wrangler secret put SENKU_SOYUZ_API_TOKEN
 ```
 
-No production deployment is part of Phase 2B. Never run `npm run deploy` as part of routine validation.
+No production deployment is part of Phase 2C. Never run `npm run deploy` as part of routine validation.
 
 The model alias remains `~typesafe/jev-latest`; Senku returns the resolved provider model identifier. There is one provider request per evaluation, no retry, no fallback, no per-profile model, and one allowed provider subrequest.
 
@@ -85,6 +89,9 @@ curl http://127.0.0.1:8787/v1/profiles/task_admission_v1/evaluate \
 
 curl http://127.0.0.1:8787/openapi.json \
   -H 'Authorization: Bearer <SENKU_SOYUZ_API_TOKEN>'
+
+curl http://127.0.0.1:8787/utcp \
+  -H 'Authorization: Bearer <SENKU_KASEKI_API_TOKEN>'
 ```
 
 The Soyuz credential cannot call the generic `/v1/decisions` route or inspect Kaseki profile contracts. Kaseki cannot inspect or invoke Soyuz profiles.
@@ -99,6 +106,6 @@ Senku remains stateless with no D1, KV, R2, Queue, or Durable Object. It uses on
 
 ## CI and future deployment
 
-CI runs typecheck, tests with mocked provider responses, and Wrangler's dry-run build. No live provider inference runs in CI. Before a future deployment, configure the two distinct machine secrets and the OpenRouter secret in the intended Cloudflare account, verify `/readyz`, inspect the OpenAPI document using each identity, and confirm the provider-side spending limit.
+CI should run typecheck, tests with mocked provider responses, independent OpenAPI validation, and Wrangler's dry-run build. No live provider inference runs in routine CI. Before a future deployment, configure the trusted public base URL, the two distinct machine secrets, and the OpenRouter secret in the intended Cloudflare account; verify `/readyz`; inspect both identity-filtered discovery responses; and confirm the provider-side spending limit. This implementation did not deploy or verify account secrets or spending limits.
 
 The future Soyuz Service Binding is a transport choice. A trusted server-derived identity resolver can attach Soyuz identity at the HTTP boundary; profile permissions remain checked by the same central policy. Binding setup and consumer migrations are deferred.
