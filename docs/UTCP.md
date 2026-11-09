@@ -135,4 +135,4 @@ There is no wrapper around this body, no query string for a valid invocation, an
 - Discovery performs no inference. Invalid, forbidden, malformed, unsupported-version, and oversized requests are rejected before provider invocation. Server errors do not include raw evidence or credentials.
 - Senku's manual describes decision evaluation only. Future Soyuz UTCP belongs in the Soyuz repository and will describe Soyuz-owned run-management operations. Neither requires an MCP-compatible proxy for native UTCP invocation.
 
-For local tests and performance measurements, see [DEVELOPMENT.md](DEVELOPMENT.md) and [PHASE-2C-DECISIONS.md](PHASE-2C-DECISIONS.md).
+The production HTTPS hostname is configured as `https://senku.scheimann.workers.dev`, but the Worker has not been deployed and remote UTCP interoperability has not been verified. See [PHASE-2D-DEPLOYMENT.md](PHASE-2D-DEPLOYMENT.md) for the current gate and verification procedure. For local tests and performance measurements, see [DEVELOPMENT.md](DEVELOPMENT.md) and [PHASE-2C-DECISIONS.md](PHASE-2C-DECISIONS.md).

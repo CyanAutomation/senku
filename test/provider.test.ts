@@ -62,7 +62,7 @@ describe("OpenRouter Decisions adapter", () => {
     const call = fetcher.mock.calls[0];
     expect(String(call[0])).toBe("https://openrouter.ai/api/alpha/decisions");
     expect(call[1]?.method).toBe("POST");
-    expect(call[1]?.redirect).toBe("error");
+    expect(call[1]?.redirect).toBe("manual");
     expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer test-openrouter-key");
     const sent = JSON.parse(String(call[1]?.body));
     expect(sent.model).toBe("~typesafe/jev-latest");
