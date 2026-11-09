@@ -32,9 +32,9 @@ Cloudflare recommends @cloudflare/vitest-plugin for tests that run in the Worker
 
 ## Provider, authentication, and cost policy
 
-The adapter calls the fixed OpenRouter Decisions API endpoint, rejects redirects, uses the OPENROUTER_API_KEY Worker secret, and never accepts a model or destination from the caller. The default model alias is ~typesafe/jev-latest; operators can pin JEV_MODEL to a stable model identifier.
+The adapter calls the fixed OpenRouter Decisions API endpoint, rejects redirects, uses the OPENROUTER_API_KEY Worker secret, and never accepts a model or destination from the caller. The model is fixed to the exact alias `~typesafe/jev-latest`. If `JEV_MODEL` is set, it must match that alias; a stable model identifier is not accepted.
 
-The generic route is authenticated with SENKU_KASEKI_API_TOKEN. Authentication occurs before content-type checking and request parsing. Token digests are compared using a fixed-length byte loop. The initial authenticated identity is labelled kaseki. This seam can later resolve multiple machine identities and permissions; Soyuz Service Binding access alone would not grant permission.
+The generic route is authenticated with `SENKU_KASEKI_API_TOKEN`. Authentication occurs before content-type checking and request parsing. The token must be 32–1,024 printable ASCII characters with no whitespace; configuration is not trimmed. Token digests are compared using a fixed-length byte loop. The authenticated identity is labelled `kaseki`. Phase 2A adds a central profile permission policy and internal `soyuz` identity for the three Soyuz-owned profiles, but no Soyuz credential or Service Binding transport exists. Service Binding access alone would not grant permission.
 
 Automatic retries are disabled to avoid multiplying inference cost. Timeouts, transport errors, and transient provider status codes are classified retryable for an external caller to decide. Per-request size, count, attempt, and timeout limits are not a global inference-spend cap.
 
@@ -42,7 +42,7 @@ Routine logs contain request ID, client label, outcome, model, counts, sizes, du
 
 ## Deferred work
 
-Phase 1 does not implement decision profiles, profile-level authorization, a Soyuz identity, Service Binding transport, consumer adapters, OpenAPI generation, UTCP, persistence, quotas, a dashboard, or production deployment. Phase 2 can add the versioned profile registry and consumer-specific permission map. The Soyuz MCP-to-UTCP migration remains in Soyuz.
+At the Phase 1 baseline, decision profiles, profile-level authorization, and a Soyuz identity were deferred. Phase 2A now implements the internal versioned profile registry and consumer-specific permission policy. Public profile HTTP routes, Soyuz authentication and Service Binding transport, consumer adapters, OpenAPI generation, UTCP, persistence, quotas, a dashboard, and production deployment remain deferred. The Soyuz MCP-to-UTCP migration remains in Soyuz.
 
 ## Measurements and limits
 
