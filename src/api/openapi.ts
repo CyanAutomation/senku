@@ -20,7 +20,7 @@ function commonErrors(statuses: readonly number[]): Record<string, unknown> {
     400: "The request body, schema version, or profile input is invalid.",
     401: "The bearer credential is missing or invalid.",
     403: "The authenticated identity is not permitted to use the requested operation.",
-    404: "The route or profile was not found.",
+    404: "The route was not found.",
     405: "The HTTP method is not supported for this route.",
     413: "The request or evidence exceeds its configured byte limit.",
     415: "The request body must use application/json.",
@@ -213,7 +213,7 @@ export function buildOpenApiDocument(identity: ClientIdentity): Record<string, u
         parameters: [profileIdsParameter(profileIds)],
         responses: {
           "200": response({ oneOf: profileContractRefs }, "Public input and output schemas, limits, and operation for this profile."),
-          ...commonErrors([401, 403, 404, 405, 500, 503]),
+          ...commonErrors([400, 401, 403, 405, 500, 503]),
         },
       },
     },
@@ -224,7 +224,7 @@ export function buildOpenApiDocument(identity: ClientIdentity): Record<string, u
         requestBody: { required: true, content: { "application/json": { schema: { oneOf: profileRequestRefs } } } },
         responses: {
           "200": response({ oneOf: profileResponseRefs }, "Stable version 1 profile evaluation response."),
-          ...commonErrors([400, 401, 403, 404, 405, 413, 415, 500, 502, 503, 504]),
+          ...commonErrors([400, 401, 403, 405, 413, 415, 500, 502, 503, 504]),
         },
       },
     },

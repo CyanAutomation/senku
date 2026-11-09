@@ -29,8 +29,9 @@ export function allowedClientsForProfile(profileId: ProfileId): readonly ClientI
   return PROFILE_CLIENT_PERMISSIONS[profileId];
 }
 
-export function canEvaluateProfile(profileId: ProfileId, clientId: ClientIdentity): boolean {
-  return (PROFILE_CLIENT_PERMISSIONS[profileId] as readonly ClientIdentity[]).includes(clientId);
+export function canEvaluateProfile(profileId: string, clientId: ClientIdentity): boolean {
+  if (!Object.hasOwn(PROFILE_CLIENT_PERMISSIONS, profileId)) return false;
+  return (PROFILE_CLIENT_PERMISSIONS[profileId as ProfileId] as readonly ClientIdentity[]).includes(clientId);
 }
 
 export function profileOwner(

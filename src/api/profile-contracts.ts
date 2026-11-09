@@ -48,23 +48,23 @@ export function listPublicProfiles(identity: ClientIdentity): PublicProfileMetad
 
 export function getPublicProfileContract(profileId: string): PublicProfileContract {
   const profile = profileRegistry.getProfile(profileId);
-  const metadata = profileRegistry.listProfiles().find((item) => item.id === profileId)!;
+  const questionCount = Object.keys(profile.questions).length;
   return {
     schemaVersion: SCHEMA_VERSION,
-    id: metadata.id,
-    version: metadata.version,
-    name: metadata.name,
-    description: metadata.description,
-    owner: metadata.owner,
-    questionCount: metadata.questionCount,
-    maxEvidenceBytes: metadata.maxEvidenceBytes,
+    id: profile.id,
+    version: profile.version,
+    name: profile.name,
+    description: profile.description,
+    owner: profile.owner,
+    questionCount,
+    maxEvidenceBytes: profile.maxEvidenceBytes,
     operations: ["evaluate"],
     inputSchema: profile.inputSchema,
     outputSchema: profileOutputSchema(profile),
     limits: {
       requestBytes: LIMITS.requestBytes,
-      maxEvidenceBytes: metadata.maxEvidenceBytes,
-      questionCount: metadata.questionCount,
+      maxEvidenceBytes: profile.maxEvidenceBytes,
+      questionCount,
     },
     evaluationEndpoint: "/v1/profiles/{profileId}/evaluate",
   };

@@ -210,13 +210,13 @@ describe("Worker routes and decision orchestration", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("returns 404 for unknown profile routes and 405 for unsupported methods", async () => {
+  it("returns 403 for unknown profile routes and 405 for unsupported methods", async () => {
     const worker = createTestWorker(async () => providerResponse(kasekiRequest as unknown as DecisionRequest));
     const missing = await worker.fetch(new Request("https://senku.test/v1/profiles/no_such_profile", {
       headers: { authorization: "Bearer test-client-token-0123456789abcdef" },
     }), env);
-    expect(missing.status).toBe(404);
-    expect((await missing.json() as { error: { code: string } }).error.code).toBe("NOT_FOUND");
+    expect(missing.status).toBe(403);
+    expect((await missing.json() as { error: { code: string } }).error.code).toBe("FORBIDDEN");
 
     const wrongMethod = await worker.fetch(new Request("https://senku.test/v1/decisions"), env);
     expect(wrongMethod.status).toBe(405);
