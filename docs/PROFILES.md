@@ -22,6 +22,8 @@ The Soyuz question names, answer keys, choice labels, score scales, and recorded
 
 The Kaseki answer keys and criteria match its current `buildTaskAdmissionRequest()` and `buildValidationRecoveryQuestions()` builders. Kaseki retains deterministic credential screening, admission, command allowlists, retry ceilings, and execution policy. The profiles do not admit or reject tasks, run commands, retry validations, edit files, or authorise publication.
 
+`validation_recovery_v1` accepts a command of at most 1,000 UTF-8 bytes, an exit code from 0 through 255, and output of at most 6,000 UTF-8 bytes. Its provider projection retains at most the final 5,000 JavaScript UTF-16 code units of that output; the profile's 8 KiB aggregate evidence cap still applies.
+
 ## Input and output contracts
 
 Each profile rejects unexpected top-level fields and validates its required fields, enums, types, numeric ranges, string sizes, nested settings, and aggregate evidence size. The task-admission input uses Kaseki's current task-mode values (`patch`, `inspect`) and publish-mode values (`auto`, `none`, `branch`, `pr`). Common credential patterns are redacted before Kaseki state is sent upstream; Kaseki's own deterministic screening remains authoritative.
