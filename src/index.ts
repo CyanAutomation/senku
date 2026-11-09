@@ -284,7 +284,6 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
             error,
             method: request.method,
             path: logPath,
-            profileId,
             workerDurationMs: elapsedMs(started),
             event: "profile.request_failed",
           });
