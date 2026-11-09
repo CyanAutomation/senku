@@ -6,7 +6,8 @@
   "workers_dev": true,
   "vars": {
     "JEV_MODEL": "~typesafe/jev-latest",
-    "SENKU_PROVIDER_TIMEOUT_MS": "15000"
+    "SENKU_PROVIDER_TIMEOUT_MS": "15000",
+    "SENKU_PUBLIC_BASE_URL": "https://senku.scheimann.workers.dev"
   },
   "limits": {
     "cpu_ms": 10,

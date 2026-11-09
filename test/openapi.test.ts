@@ -41,6 +41,7 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
       expect(paths).toHaveProperty("/v1/profiles/{profileId}");
       expect(paths).toHaveProperty("/v1/profiles/{profileId}/evaluate");
       expect(paths).toHaveProperty("/openapi.json");
+      expect(paths).toHaveProperty("/utcp");
       expect(paths).toHaveProperty("/healthz");
       expect(paths).toHaveProperty("/readyz");
       const profileEvaluation = (paths["/v1/profiles/{profileId}/evaluate"] as { post: { responses: Record<string, unknown> } }).post;
@@ -60,7 +61,7 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
       }
       expect(JSON.stringify(document)).not.toContain("Does this run record warrant human follow-up now?");
       expect(JSON.stringify(document)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ)_API_TOKEN|OPENROUTER_API_KEY/);
-      expect(JSON.stringify(paths)).not.toMatch(/utcp|mcp/i);
+      expect(JSON.stringify(paths)).not.toMatch(/mcp/i);
     }
   });
 

@@ -159,6 +159,55 @@ export function profileOutputSchema(profile: AnyDecisionProfile): JsonSchema {
   return profileAnswersSchema(profile);
 }
 
+export function profileEvaluationRequestSchema(
+  profile: AnyDecisionProfile,
+  inputSchema: JsonSchema = profile.inputSchema,
+): JsonSchema {
+  return {
+    type: "object",
+    required: ["schemaVersion", "input"],
+    additionalProperties: false,
+    properties: {
+      schemaVersion: { type: "string", const: SCHEMA_VERSION },
+      input: inputSchema,
+    },
+  };
+}
+
+export function profileEvaluationResponseSchema(
+  profile: AnyDecisionProfile,
+  answersSchema: JsonSchema = profileAnswersSchema(profile),
+): JsonSchema {
+  return {
+    type: "object",
+    required: ["schemaVersion", "requestId", "status", "profileId", "profileVersion", "provider", "model", "answers", "result", "durationMs", "attemptCount"],
+    additionalProperties: false,
+    properties: {
+      schemaVersion: { type: "string", const: SCHEMA_VERSION },
+      requestId: { type: "string", pattern: "^dec-" },
+      status: { type: "string", const: "completed" },
+      profileId: { type: "string", const: profile.id },
+      profileVersion: { type: "string", const: profile.version },
+      provider: { type: "string", const: "jev" },
+      model: { type: "string", minLength: 1, maxLength: 200, description: "Resolved model identifier returned by OpenRouter." },
+      answers: answersSchema,
+      result: answersSchema,
+      usage: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          input_tokens: { type: "integer", minimum: 0 },
+          output_tokens: { type: "integer", minimum: 0 },
+          total_tokens: { type: "integer", minimum: 0 },
+          cost: { type: "number", minimum: 0 },
+        },
+      },
+      durationMs: { type: "integer", minimum: 0 },
+      attemptCount: { type: "integer", const: 1 },
+    },
+  };
+}
+
 export function canonicalAnswerSchema(): JsonSchema {
   return {
     oneOf: [

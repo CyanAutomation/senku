@@ -114,6 +114,7 @@ export interface Environment {
   OPENROUTER_API_KEY?: string;
   SENKU_KASEKI_API_TOKEN?: string;
   SENKU_SOYUZ_API_TOKEN?: string;
+  SENKU_PUBLIC_BASE_URL?: string;
   JEV_MODEL?: string;
   SENKU_PROVIDER_TIMEOUT_MS?: string;
 }
