@@ -1,4 +1,5 @@
-import { authenticateBearer } from "./auth/bearer";
+import { authenticateBearer, isMachineTokenConfigValid } from "./auth/bearer";
+import { canUseGenericDecisions } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
 import { validateDecisionRequest } from "./contracts/validation";
 import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
@@ -42,9 +43,9 @@ function timeoutIsStructurallyValid(env: Environment): boolean {
 }
 
 function ready(env: Environment): boolean {
-  const authConfigured = Boolean(env.SENKU_KASEKI_API_TOKEN?.trim())
-    && new TextEncoder().encode(env.SENKU_KASEKI_API_TOKEN?.trim() ?? "").byteLength <= 1_024;
-  return authConfigured && resolveProviderConfig(env).ok && timeoutIsStructurallyValid(env);
+  return isMachineTokenConfigValid(env.SENKU_KASEKI_API_TOKEN)
+    && resolveProviderConfig(env).ok
+    && timeoutIsStructurallyValid(env);
 }
 
 function hasJsonContentType(request: Request): boolean {
@@ -176,6 +177,19 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         const error = new ApiError(authentication.reason === "not_configured" ? "NOT_CONFIGURED" : "UNAUTHENTICATED");
         logFailure(logger, {
           requestId: id,
+          error,
+          method: request.method,
+          path: url.pathname,
+          workerDurationMs: elapsedMs(started),
+        });
+        return errorResponse(error, id);
+      }
+
+      if (!canUseGenericDecisions(authentication.clientId)) {
+        const error = new ApiError("FORBIDDEN");
+        logFailure(logger, {
+          requestId: id,
+          clientId: authentication.clientId,
           error,
           method: request.method,
           path: url.pathname,

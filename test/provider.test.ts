@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
-import { ProviderError, requestOpenRouterDecision, type ProviderConfig } from "../src/providers/openrouter/decisions";
+import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../src/providers/openrouter/decisions";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 
 const request = kasekiRequest as unknown as DecisionRequest;
@@ -91,6 +91,66 @@ describe("OpenRouter Decisions adapter", () => {
     expect(result.answers.failure_cause).toMatchObject({ confidence: null });
     expect(result.answers.completion_score).toMatchObject({ confidence: null });
     expect(result.usage).toBeUndefined();
+  });
+
+  it("normalizes explicit null confidence for choice and score answers", async () => {
+    const body = providerBody();
+    (body.answers.failure_cause as Record<string, unknown>).confidence = null;
+    (body.answers.completion_score as Record<string, unknown>).confidence = null;
+    const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
+    expect(result.answers.failure_cause).toMatchObject({ confidence: null });
+    expect(result.answers.completion_score).toMatchObject({ confidence: null });
+  });
+
+  it("rejects malformed confidence values for choice and score answers", async () => {
+    for (const invalid of ["0.5", {}, -0.01, 1.01]) {
+      const choice = providerBody();
+      (choice.answers.failure_cause as Record<string, unknown>).confidence = invalid;
+      await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(choice)), "INVALID_PROVIDER_RESPONSE", false);
+
+      const score = providerBody();
+      (score.answers.completion_score as Record<string, unknown>).confidence = invalid;
+      await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(score)), "INVALID_PROVIDER_RESPONSE", false);
+    }
+  });
+
+  it("accepts bounded source annotations but never exposes or stores them", async () => {
+    const body = providerBody({ annotations: [{ url: "https://example.test/source", title: "Source", excerpt: "bounded context" }] });
+    const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
+    expect(result.model).toBe(body.model);
+    expect("annotations" in result).toBe(false);
+  });
+
+  it("rejects malformed or oversized annotations", async () => {
+    for (const annotations of ["source", ["source"], [null], [{}]]) {
+      const body = providerBody({ annotations });
+      await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(body)), "INVALID_PROVIDER_RESPONSE", false);
+    }
+
+    const tooMany = providerBody({ annotations: Array.from({ length: 33 }, () => ({ url: "https://example.test" })) });
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(tooMany)), "INVALID_PROVIDER_RESPONSE", false);
+
+    const tooLarge = providerBody({ annotations: [{ content: "x".repeat(16 * 1024) }] });
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(tooLarge)), "INVALID_PROVIDER_RESPONSE", false);
+  });
+
+  it("normalizes stream-read failures without leaking provider details or making retries", async () => {
+    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.error(new Error("private upstream stream detail"));
+      },
+    }), { headers: { "content-type": "application/json" } }));
+    await expectProviderError(requestOpenRouterDecision(request, config, fetcher), "PROVIDER_UNAVAILABLE", true);
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("constrains configuration to the exact selected model alias", () => {
+    expect(DEFAULT_JEV_MODEL).toBe("~typesafe/jev-latest");
+    expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key" })).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
+    expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key", JEV_MODEL: DEFAULT_JEV_MODEL })).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
+    for (const JEV_MODEL of ["typesafe/jev-latest", "typesafe/jev-1.13", "~typesafe/jev-1.14", " ~typesafe/jev-latest"]) {
+      expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key", JEV_MODEL })).toEqual({ ok: false });
+    }
   });
 
   it("reconstructs a missing score legend from the declared scale", async () => {
