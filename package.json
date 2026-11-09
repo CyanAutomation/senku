@@ -11,14 +11,18 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "perf:smoke": "vitest run test/performance.smoke.test.ts --reporter=verbose",
+    "test": "vitest run && npm run validate:openapi",
+    "validate:openapi": "vitest run --config vitest.openapi.config.ts",
+    "perf:smoke": "vitest run test/performance.smoke.test.ts test/utcp.test.ts --reporter=verbose --maxWorkers=1",
     "smoke:provider": "vitest run --config vitest.provider-smoke.config.ts",
     "build": "wrangler deploy --dry-run --outdir dist",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.6.0",
+    "@redocly/openapi-core": "2.77.0",
+    "@utcp/http": "1.1.14",
+    "@utcp/sdk": "1.2.0",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.158.0"

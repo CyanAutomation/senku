@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
 import { LIMITS, type DecisionRequest, type Environment } from "../src/contracts/decisions";
 
@@ -6,6 +6,7 @@ const environment: Environment = {
   OPENROUTER_API_KEY: "performance-test-key",
   SENKU_KASEKI_API_TOKEN: "performance-client-token-0123456789abcdef",
   SENKU_SOYUZ_API_TOKEN: "performance-soyuz-token-0123456789abcdef",
+  SENKU_PUBLIC_BASE_URL: "https://senku.scheimann.workers.dev",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
@@ -46,6 +47,67 @@ function mockedProviderResponse(request: DecisionRequest): Response {
 }
 
 describe("bounded request performance smoke", () => {
+  it("measures permission-scoped discovery and OpenAPI serialization without provider calls", async () => {
+    const provider = vi.fn(async () => new Response("{}", { status: 500 }));
+    const worker = createWorker({ fetchImpl: provider, logger: () => undefined });
+    const scenarios = [
+      {
+        identity: "kaseki" as const,
+        token: "performance-client-token-0123456789abcdef",
+        profiles: ["task_admission_v1", "validation_recovery_v1"],
+      },
+      {
+        identity: "soyuz" as const,
+        token: "performance-soyuz-token-0123456789abcdef",
+        profiles: ["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"],
+      },
+    ];
+    const results: Array<{
+      identity: string;
+      endpoint: string;
+      coldWallMs: number;
+      warmAverageWallMs: number;
+      warmMaxWallMs: number;
+      responseBytes: number;
+    }> = [];
+
+    for (const scenario of scenarios) {
+      const endpoints = ["/utcp", "/openapi.json", "/v1/profiles", ...scenario.profiles.map((profileId) => `/v1/profiles/${profileId}`)];
+      for (const endpoint of endpoints) {
+        const elapsed: number[] = [];
+        let responseBytes = 0;
+        for (let run = 0; run < 5; run += 1) {
+          const started = performance.now();
+          const response = await worker.fetch(new Request(`https://senku.test${endpoint}`, {
+            headers: { authorization: `Bearer ${scenario.token}` },
+          }), environment);
+          const body = await response.text();
+          elapsed.push(performance.now() - started);
+          responseBytes = new TextEncoder().encode(body).byteLength;
+          expect(response.status).toBe(200);
+          expect(response.headers.get("cache-control")).toBe("no-store");
+          expect(JSON.parse(body)).toBeDefined();
+        }
+        results.push({
+          identity: scenario.identity,
+          endpoint,
+          coldWallMs: Number(elapsed[0].toFixed(2)),
+          warmAverageWallMs: Number((elapsed.slice(1).reduce((sum, value) => sum + value, 0) / 4).toFixed(2)),
+          warmMaxWallMs: Number(Math.max(...elapsed.slice(1)).toFixed(2)),
+          responseBytes,
+        });
+      }
+    }
+
+    expect(provider).not.toHaveBeenCalled();
+    console.log(JSON.stringify({
+      benchmark: "local workerd discovery wall time; first request includes bounded generation, warm requests use cached JSON; not billed CPU",
+      providerCalls: provider.mock.calls.length,
+      results,
+    }));
+    expect(results).toHaveLength(11);
+  });
+
   it("exercises small, typical, and upper-bound payloads in the Workers runtime", async () => {
     const makeBody = (questionCount: number, state: string | Record<string, unknown>) => JSON.stringify({
       schemaVersion: "1",

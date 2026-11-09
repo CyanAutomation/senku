@@ -8,6 +8,7 @@ const env: Environment = {
   OPENROUTER_API_KEY: "test-openrouter-key",
   SENKU_KASEKI_API_TOKEN: "test-client-token-0123456789abcdef",
   SENKU_SOYUZ_API_TOKEN: "test-soyuz-token-0123456789abcdef",
+  SENKU_PUBLIC_BASE_URL: "https://senku.scheimann.workers.dev",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };

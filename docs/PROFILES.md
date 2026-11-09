@@ -16,6 +16,20 @@ No profile accepts caller-supplied questions, criteria, provider URLs, or model 
 
 The request body cap is 128 KiB. Per-profile projected-evidence caps are checked again after validation and redaction, before provider invocation.
 
+## UTCP tool names
+
+Authenticated `GET /utcp` publishes these profile tools using the central permission matrix. The `request` argument contains the same versioned REST envelope shown above; each tool sends that object directly to its existing evaluation route.
+
+| UTCP tool | Profile ID | Identity |
+| --- | --- | --- |
+| `assess_task_admission` | `task_admission_v1` | Kaseki |
+| `assess_validation_recovery` | `validation_recovery_v1` | Kaseki |
+| `triage_run_evidence` | `run_operations_triage_v1` | Soyuz |
+| `review_kaseki_output_v1` | `kaseki_output_review_v1` | Soyuz |
+| `review_kaseki_output_v2` | `kaseki_output_review_v2` | Soyuz |
+
+The published manual is discovery metadata. It does not add an execution or inference route, and every result remains advisory. See [UTCP.md](UTCP.md) for client-side authentication and request mapping.
+
 ## Input summaries
 
 The full machine-readable schema is returned under `inputSchema` from `GET /v1/profiles/{profileId}` and appears in the caller's `/openapi.json` document. All schemas reject undeclared object properties.
@@ -74,4 +88,4 @@ Changing required input, question meaning, answer IDs, labels, score scale, or r
 
 ## Generic endpoint and deferred work
 
-`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access. UTCP discovery, MCP, actual Service Binding setup, consumer adapters, storage/history, retries, fallback models, and dashboard changes are outside Phase 2B.
+`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access, and this endpoint is not exposed as a UTCP tool. Senku UTCP describes decision evaluations; future Soyuz UTCP belongs in the Soyuz repository and will describe run-management operations. MCP, Service Binding setup, consumer adapters, storage/history, retries, fallback models, and dashboard changes remain deferred.

@@ -1,8 +1,9 @@
 import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
 import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
-import { buildOpenApiDocument } from "./api/openapi";
+import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
+import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { validateDecisionRequest } from "./contracts/validation";
 import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
 import { ProfileEngineError } from "./contracts/profiles";
@@ -26,7 +27,11 @@ export interface WorkerDependencies {
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
-  return new Response(JSON.stringify(value), {
+  return serializedJsonResponse(JSON.stringify(value), status);
+}
+
+function serializedJsonResponse(value: string, status = 200): Response {
+  return new Response(value, {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -51,6 +56,7 @@ function timeoutIsStructurallyValid(env: Environment): boolean {
 
 function ready(env: Environment): boolean {
   return areMachineTokenCredentialsDistinct(env)
+    && trustedSenkuOrigin(env.SENKU_PUBLIC_BASE_URL) !== null
     && resolveProviderConfig(env).ok
     && timeoutIsStructurallyValid(env);
 }
@@ -226,12 +232,15 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
       const profileDetailMatch = /^\/v1\/profiles\/([^/]+)$/.exec(url.pathname);
       const isProfileList = url.pathname === "/v1/profiles";
       const isOpenApi = url.pathname === "/openapi.json";
-      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi) {
+      const isUtcp = url.pathname === "/utcp";
+      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi || isUtcp) {
         const expectedMethod = profileEvaluationMatch ? "POST" : "GET";
         const logPath = isProfileList
           ? "/v1/profiles"
           : isOpenApi
             ? "/openapi.json"
+            : isUtcp
+              ? "/utcp"
             : profileEvaluationMatch
               ? "/v1/profiles/{profileId}/evaluate"
               : "/v1/profiles/{profileId}";
@@ -259,7 +268,13 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         if (isProfileList) {
           return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
         }
-        if (isOpenApi) return jsonResponse(buildOpenApiDocument(authentication.clientId));
+        if (isOpenApi) return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
+        if (isUtcp) {
+          const manual = serializeUtcpManual(authentication.clientId, env.SENKU_PUBLIC_BASE_URL);
+          return manual
+            ? serializedJsonResponse(manual)
+            : errorResponse(new ApiError("NOT_CONFIGURED"), id);
+        }
 
         const profileId = profileIdFromPath((profileDetailMatch ?? profileEvaluationMatch)![1]);
         if (!profileId) {
