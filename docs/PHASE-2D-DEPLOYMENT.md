@@ -1,43 +1,41 @@
-# Phase 2D deployment readiness
+# Phase 2D deployment status
 
 ## Status
 
-**Implementation-ready, not operationally complete.** No production secrets were configured and no deployment or live inference was performed for this change.
+**Deployed and health-checked; not operationally complete.** The Worker is publicly reachable, but Senku is not ready because its three secrets are not configured. No authenticated discovery, UTCP invocation, or provider inference has been run.
 
-The user-provided target hostname is `https://senku.scheimann.workers.dev`; Senku's checked-in Wrangler variable is already set to that origin. A read-only inventory of the connected Cloudflare account on 2026-11-09 listed the existing `soyuz` Worker but no `senku` Worker. The hostname and Worker name therefore remain unverified as live resources.
+Cloudflare created the `senku` Worker on 2026-11-09. The active Worker version tag is `12f21102fd644d06ab1f55b3e64290e5` and the deployment ID is `4753a344c8244752a6483d8b9c5e4126`. The `senku.scheimann.workers.dev` subdomain is enabled; preview URLs are disabled.
 
 | Check | Result |
 | --- | --- |
-| Wrangler Worker name | `senku` in `wrangler.jsonc` |
-| Configured UTCP origin | `https://senku.scheimann.workers.dev` |
-| Existing `senku` Worker in connected account | Not found during read-only inventory |
-| OpenRouter key secret | Not verified; user reports Senku secrets are not deployed |
-| Kaseki machine token | Not verified; user reports Senku secrets are not deployed |
-| Soyuz machine token | Not verified; user reports Senku secrets are not deployed |
+| Worker name and hostname | `senku`; `https://senku.scheimann.workers.dev` |
+| Deployment version | Tag `12f21102fd644d06ab1f55b3e64290e5`; deployment `4753a344c8244752a6483d8b9c5e4126` |
+| `GET /healthz` | `{"status":"ok"}` |
+| `GET /readyz` | `{"status":"not_ready"}`; expected while required secrets are absent |
+| Senku secret bindings | None configured |
 | Provider spending limit | Not verified |
-| `/healthz`, `/readyz`, auth, discovery | Not run against production |
-| Live inference / HTTPS UTCP | Not run |
-| Deployed Worker version / CPU / errors | Not available |
-| Senku rollback target | None verified yet |
+| Auth, profile discovery, and UTCP | Not run |
+| Live inference | Not run; no provider call was made |
+| CPU and error metrics | Not collected |
+| Pre-deployment rollback target | None; this was the first Senku deployment |
 
-## Configuration review
+## Configuration and plan notes
 
-The current Worker is configured with:
+The deployed Worker uses the checked-in public variables:
 
-- Name `senku` and `workers_dev: true`.
 - Model alias `~typesafe/jev-latest`.
-- Provider timeout default `15,000` ms, with application validation up to `30,000` ms.
-- CPU limit `10` ms and `1` outbound provider subrequest.
-- Senku is intended to use the Workers Free plan. Cloudflare documents Free limits of 100,000 requests per day, 10 ms CPU per HTTP request, and 50 external plus 1,000 internal-service subrequests per invocation. The configured `limits` overrides are enforced only under the Standard usage model, so the Free plan's defaults apply unless Senku is deployed under Standard.
-- No D1, KV, R2, Queue, or Durable Object binding.
-- Trusted UTCP origin `https://senku.scheimann.workers.dev`.
-- OpenRouter requests use manual redirect handling; redirect responses are rejected as non-success and are not followed by the Worker runtime.
+- Provider timeout `15,000` ms.
+- Public base URL `https://senku.scheimann.workers.dev`.
 
-The account inventory shows Soyuz using the Workers `standard` usage model, but Senku does not yet exist there, so its deployed usage model and CPU measurements cannot be verified. Cloudflare documents [Service Bindings](https://developers.cloudflare.com/workers/runtime-apis/bindings/service-bindings/) for same-account Worker-to-Worker calls and lists them under Free-plan internal subrequests in its [limits documentation](https://developers.cloudflare.com/workers/platform/limits/#worker-to-worker-subrequests). The [no-additional-request-fee treatment](https://developers.cloudflare.com/workers/platform/pricing/#service-bindings) applies to Standard pricing; do not assume that billing treatment for a Free Worker. Confirm Senku's actual deployed plan and inspect its request and CPU metrics before deploying the Soyuz binding; no account upgrade or new Cloudflare resource is part of this implementation.
+It has no D1, KV, R2, Queue, or Durable Object binding. Workers Logs and Traces are enabled with query-string redaction, 10% log sampling, and 1% trace sampling.
+
+The first upload attempt included `limits.cpu_ms: 10` and `limits.subrequests: 1`; Cloudflare rejected it because custom CPU limits are unsupported on the account's current Workers Free plan. Per the operator's direction, the `limits` override was removed from `wrangler.jsonc`, and the successful deployment used Cloudflare's account defaults. This means the configured one-subrequest cap is not active. Cloudflare documents Free-plan defaults of 10 ms CPU per HTTP request and 50 external subrequests per invocation in its [Workers limits documentation](https://developers.cloudflare.com/workers/platform/limits/#account-plan-limits).
+
+Cloudflare's Worker API reports `usage_model: standard`, matching the account's configured default. No account plan or billing setting was changed. The upload rejection confirmed that the current account does not accept custom CPU limits. Verify billing and runtime metrics in the Cloudflare dashboard before relying on pricing assumptions or activating Soyuz's Service Binding.
 
 ## Required production secrets
 
-Configure these as Worker secrets only after the Worker exists and deployment is authorized:
+Configure these as Worker secrets after deployment:
 
 | Secret | Purpose |
 | --- | --- |
@@ -45,32 +43,28 @@ Configure these as Worker secrets only after the Worker exists and deployment is
 | `SENKU_KASEKI_API_TOKEN` | Kaseki machine identity |
 | `SENKU_SOYUZ_API_TOKEN` | Soyuz machine identity, shared with the Soyuz Worker |
 
-Do not put values in Wrangler `vars`, source control, CI logs, or chat. The two Senku machine tokens must be distinct and meet Senku's existing format checks. The Soyuz copy of `SENKU_SOYUZ_API_TOKEN` must match Senku's Soyuz identity secret.
+Cloudflare currently reports no secret bindings for Senku. Do not put values in Wrangler `vars`, source control, CI logs, or chat. The two Senku machine tokens must be distinct and meet Senku's existing format checks. The Soyuz copy of `SENKU_SOYUZ_API_TOKEN` must match Senku's Soyuz identity secret.
 
-The OpenRouter key should have a provider-side spending cap. Verify that cap and the remaining allowance before making paid inference requests. No management credential or spending limit has been created or checked here.
+The OpenRouter key should have a provider-side spending cap. Verify that cap and remaining allowance before making paid inference requests. No management credential or spending limit has been created or checked here.
 
-## Deployment and verification procedure
+## Next verification steps
 
-After the operator authorizes the live change and configures the secrets:
+After the operator configures the secrets and verifies the provider spending cap:
 
-1. Confirm the connected Cloudflare account and target `senku` Worker.
-2. Deploy with the existing Wrangler configuration. Record the deployment timestamp and version identifier.
-3. Check `GET https://senku.scheimann.workers.dev/healthz` returns a running status and `GET /readyz` returns `ready`, without exposing secrets.
-4. Test unauthenticated requests, then test both machine identities. Confirm Kaseki sees only its two profiles and tools, and Soyuz sees only its three profiles and tools. Confirm generic decisions remain forbidden to Soyuz.
-5. Perform the bounded synthetic checks in the approved rollout: one permitted Kaseki profile and one permitted Soyuz profile. Record the resolved model, schema, provider attempt count, elapsed time, and returned usage. Do not use sensitive run content.
-6. Invoke the authenticated UTCP manual and call an advertised HTTPS profile tool with a synthetic input through the official UTCP client.
-7. Inspect Worker CPU, error rate, provider usage, and logs. Confirm no credentials, evidence, or answers were exposed.
-8. Record a known-good Worker version for rollback.
-
-Do not run these live checks until the operator has authorized deployment and paid inference. A Wrangler dry-run build or passing local tests do not prove production readiness.
+1. Confirm `GET /readyz` returns ready without exposing secret values.
+2. Test unauthenticated requests, then test both machine identities. Confirm Kaseki sees only its two profiles and tools, and Soyuz sees only its three profiles and tools. Confirm generic decisions remain forbidden to Soyuz.
+3. Perform only the authorized bounded synthetic inference and UTCP profile invocation. Record the resolved model, schema, provider attempt count, elapsed time, and returned usage. Do not use sensitive run content.
+4. Inspect Worker CPU, errors, provider usage, and logs. Confirm no credentials, evidence, or answers were exposed.
+5. Keep Soyuz production integration inactive until Senku passes those checks and the spend cap is confirmed.
 
 ## Rollback
 
-No deployed Senku version or rollback target has been verified. Once Senku has a known-good deployed version, record that version and use Cloudflare's approved version rollback process if a later deployment fails. Do not remove machine credentials during a rollback. Senku is not activated for Soyuz until the service is deployed, ready, authenticated, and verified.
+This was the first Senku deployment, so no earlier version exists to restore. The current version tag `12f21102fd644d06ab1f55b3e64290e5` is the baseline for a future version rollback. To take the public endpoint offline, disable the Worker `workers.dev` subdomain in Cloudflare. Do not remove machine credentials during a code rollback.
 
-## Limitations
+## Remaining limitations
 
-- The Worker and public hostname are not yet live-verified.
-- Secrets and OpenRouter spending controls are unverified.
-- No live OpenRouter inference or deployed CPU/error measurements are available.
-- Soyuz's Phase 3A code uses a direct Service Binding switchover without a runtime feature flag. Do not deploy that Soyuz revision before completing Senku verification and setting the matching Soyuz machine secret.
+- Readiness is false until all three secrets are configured.
+- Provider spending controls are unverified.
+- Authenticated discovery, UTCP HTTPS interoperability, and bounded inference remain untested.
+- Production CPU, error, and provider usage metrics have not been collected.
+- Soyuz's Phase 3A code uses a direct Service Binding switchover without a runtime feature flag. Do not activate or deploy that Soyuz revision before completing Senku verification and configuring the matching Soyuz machine secret.
