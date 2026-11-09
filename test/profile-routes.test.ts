@@ -212,15 +212,22 @@ describe("authenticated profile REST routes", () => {
     expect(failureBody).not.toHaveProperty("result");
     expect(failureLogs.at(-1)).toMatchObject({ event: "profile.evaluation_failed", attemptCount: 1 });
 
+    const invalidOutputLogs: Array<Record<string, unknown>> = [];
     const invalidOutput = await createWorker({
       fetchImpl: async (_input, init) => providerResponse(JSON.parse(String(init?.body)) as DecisionRequest, { invalid: true }),
-      logger: () => undefined,
+      logger: (record) => invalidOutputLogs.push(record as Record<string, unknown>),
     }).fetch(request("/v1/profiles/validation_recovery_v1/evaluate", {
       method: "POST", token: KASEKI_TOKEN,
       body: { schemaVersion: "1", input: { command: "npm test", exitCode: 1, output: "safe" } }, contentType: "application/json",
     }), env);
     expect(invalidOutput.status).toBe(502);
     expect((await invalidOutput.json() as { error: { code: string } }).error.code).toBe("INVALID_PROVIDER_RESPONSE");
+    expect(invalidOutputLogs.at(-1)).toMatchObject({
+      event: "profile.evaluation_failed",
+      errorCode: "INVALID_PROVIDER_RESPONSE",
+      providerDiagnosticCode: "response_answer_set_mismatch",
+    });
+    expect(JSON.stringify(invalidOutputLogs)).not.toContain("upstream private response");
   });
 
   it("keeps caller evidence out of provider-visible logs", async () => {

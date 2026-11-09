@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../src/providers/openrouter/decisions";
+import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 
 const request = kasekiRequest as unknown as DecisionRequest;
@@ -44,7 +45,12 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
-async function expectProviderError(promise: Promise<unknown>, code: ProviderError["code"], retryable: boolean) {
+async function expectProviderError(
+  promise: Promise<unknown>,
+  code: ProviderError["code"],
+  retryable: boolean,
+  diagnosticCode?: ProviderError["diagnosticCode"],
+) {
   try {
     await promise;
     throw new Error("Expected provider request to fail.");
@@ -52,6 +58,7 @@ async function expectProviderError(promise: Promise<unknown>, code: ProviderErro
     expect(error).toBeInstanceOf(ProviderError);
     expect((error as ProviderError).code).toBe(code);
     expect((error as ProviderError).retryable).toBe(retryable);
+    if (diagnosticCode) expect((error as ProviderError).diagnosticCode).toBe(diagnosticCode);
   }
 }
 
@@ -114,24 +121,62 @@ describe("OpenRouter Decisions adapter", () => {
     }
   });
 
-  it("accepts bounded source annotations but never exposes or stores them", async () => {
+  it("ignores source annotations without exposing or storing them", async () => {
     const body = providerBody({ annotations: [{ url: "https://example.test/source", title: "Source", excerpt: "bounded context" }] });
     const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
     expect(result.model).toBe(body.model);
     expect("annotations" in result).toBe(false);
   });
 
-  it("rejects malformed or oversized annotations", async () => {
-    for (const annotations of ["source", ["source"], [null], [{}]]) {
-      const body = providerBody({ annotations });
-      await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(body)), "INVALID_PROVIDER_RESPONSE", false);
-    }
+  it("ignores additive provider envelope metadata and projects only recognized usage fields", async () => {
+    const body = providerBody({
+      annotations: null,
+      provider: { name: "TypeSafe", route: "new-provider-metadata" },
+      future_response_field: { nested: [1, 2, 3] },
+      usage: {
+        input_tokens: 420,
+        output_tokens: 30,
+        cost: 0.0001,
+        prompt_tokens: 419,
+        cost_details: { upstream_inference_cost: 0.00008 },
+      },
+    });
+    const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
+    expect(result.usage).toEqual({ input_tokens: 420, output_tokens: 30, cost: 0.0001 });
+    expect("annotations" in result).toBe(false);
+  });
 
-    const tooMany = providerBody({ annotations: Array.from({ length: 33 }, () => ({ url: "https://example.test" })) });
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(tooMany)), "INVALID_PROVIDER_RESPONSE", false);
+  it("omits malformed optional usage metadata without rejecting validated answers", async () => {
+    const body = providerBody({ usage: { input_tokens: 420, output_tokens: "unknown", cost: -1 } });
+    const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
+    expect(result.answers.safe_to_retry).toMatchObject({ type: "noul", noul: 0.91 });
+    expect(result.usage).toEqual({ input_tokens: 420 });
+  });
 
-    const tooLarge = providerBody({ annotations: [{ content: "x".repeat(16 * 1024) }] });
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(tooLarge)), "INVALID_PROVIDER_RESPONSE", false);
+  it("accepts the supplied Soyuz triage answer shape and keeps profile output validation", async () => {
+    const triageRequest: DecisionRequest = { ...request, questions: runOperationsTriageProfile.questions };
+    const body = {
+      model: "typesafe/jev-1.14-20261014",
+      answers: {
+        needs_followup: { type: "noul", noul: 0.96 },
+        likely_area: {
+          type: "choice",
+          choice: "execution",
+          probabilities: { execution: 0.87, control_plane: 0.1, unknown: 0.03 },
+          confidence: 0.8,
+        },
+        severity: {
+          type: "score",
+          score: 1.48,
+          legend: { "0": "Routine", "1": "Needs review", "2": "Urgent" },
+          probabilities: { "0": 0.01, "1": 0.51, "2": 0.48 },
+          confidence: 0.26,
+        },
+      },
+    };
+    const result = await requestOpenRouterDecision(triageRequest, config, async () => jsonResponse(body));
+    expect(() => runOperationsTriageProfile.validateOutput(result.answers)).not.toThrow();
+    expect(result.answers.severity).toMatchObject({ type: "score", score: 1.48 });
   });
 
   it("normalizes stream-read failures without leaking provider details or making retries", async () => {
@@ -140,7 +185,7 @@ describe("OpenRouter Decisions adapter", () => {
         controller.error(new Error("private upstream stream detail"));
       },
     }), { headers: { "content-type": "application/json" } }));
-    await expectProviderError(requestOpenRouterDecision(request, config, fetcher), "PROVIDER_UNAVAILABLE", true);
+    await expectProviderError(requestOpenRouterDecision(request, config, fetcher), "PROVIDER_UNAVAILABLE", true, "response_body_read_failed");
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -191,11 +236,13 @@ describe("OpenRouter Decisions adapter", () => {
   });
 
   it("rejects empty, malformed, non-JSON, or oversized provider responses", async () => {
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("")), "INVALID_PROVIDER_RESPONSE", false);
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{")), "INVALID_PROVIDER_RESPONSE", false);
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("")), "INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{", {
+      headers: { "content-type": "application/json" },
+    })), "INVALID_PROVIDER_RESPONSE", false, "response_body_invalid_json");
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{}", {
       headers: { "content-type": "text/plain" },
-    })), "INVALID_PROVIDER_RESPONSE", false);
+    })), "INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
 
     const largeResponse = new Response(new ReadableStream<Uint8Array>({
       start(controller) {
@@ -203,13 +250,13 @@ describe("OpenRouter Decisions adapter", () => {
         controller.close();
       },
     }));
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => largeResponse), "INVALID_PROVIDER_RESPONSE", false);
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => largeResponse), "INVALID_PROVIDER_RESPONSE", false, "response_body_too_large");
   });
 
   it("rejects missing and unexpected answer keys, types, and nested fields", async () => {
     const missing = providerBody();
     delete (missing.answers as Record<string, unknown>).safe_to_retry;
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(missing)), "INVALID_PROVIDER_RESPONSE", false);
+    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(missing)), "INVALID_PROVIDER_RESPONSE", false, "response_answer_set_mismatch");
 
     const extra = providerBody();
     (extra.answers as Record<string, unknown>).unexpected = { type: "noul", noul: 0.5 };
