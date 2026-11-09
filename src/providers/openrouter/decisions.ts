@@ -123,7 +123,7 @@ function validScoreLegend(value: unknown, question: ScoreQuestion, expectedKeys:
   const actualKeys = Object.keys(value);
   if (actualKeys.length !== expectedKeys.length || !expectedKeys.every((key) => Object.hasOwn(value, key))) return null;
   for (const key of expectedKeys) {
-    if (typeof value[key] !== "string" || value[key].length === 0 || value[key].length > 1_000) return null;
+    if (typeof value[key] !== "string" || value[key].length === 0 || Array.from(value[key]).length > 1_000) return null;
     const criterion = question.criteria[Number(key)];
     if (typeof criterion === "string" && value[key] !== criterion) return null;
   }

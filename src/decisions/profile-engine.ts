@@ -1,6 +1,7 @@
 import { canEvaluateProfile, type ClientIdentity, type ProfileId } from "../auth/permissions";
 import { LIMITS, SCHEMA_VERSION, type Environment } from "../contracts/decisions";
 import { ProfileEngineError, type ProfileEvaluation } from "../contracts/profiles";
+import { validateJsonSchema } from "../contracts/json-schema-validation";
 import { validateDecisionRequest } from "../contracts/validation";
 import { ProviderError, requestOpenRouterDecision, resolveProviderConfig } from "../providers/openrouter/decisions";
 import { profileRegistry, type ProfileOutputFor, type RegisteredProfileId } from "./profile-registry";
@@ -40,15 +41,23 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
     throw new ProfileEngineError("FORBIDDEN_PROFILE");
   }
 
+  if (!validateJsonSchema(input, profile.inputSchema)) {
+    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
   const validatedInput = profile.validateInput(input);
-  const decision = profile.buildDecision(validatedInput);
+  let decision: ReturnType<typeof profile.buildDecision>;
+  try {
+    decision = profile.buildDecision(validatedInput);
+  } catch {
+    throw new ProfileEngineError("INVALID_PROFILE_CONFIGURATION");
+  }
   const request = {
     schemaVersion: SCHEMA_VERSION,
     state: decision.state,
     questions: decision.questions,
   };
   const validation = validateDecisionRequest(request);
-  if (!validation.ok) throw new ProfileEngineError("INVALID_PROFILE_OUTPUT");
+  if (!validation.ok) throw new ProfileEngineError("INVALID_PROFILE_CONFIGURATION");
 
   const evidenceBytes = typeof decision.state === "string"
     ? utf8Size(decision.state)

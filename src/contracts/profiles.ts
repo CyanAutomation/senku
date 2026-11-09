@@ -12,6 +12,41 @@ import type {
 } from "./decisions";
 import type { ClientIdentity } from "../auth/permissions";
 
+export type JsonSchema = boolean | {
+  $ref?: string;
+  $schema?: string;
+  title?: string;
+  description?: string;
+  type?: string | string[];
+  const?: unknown;
+  enum?: readonly unknown[];
+  format?: string;
+  pattern?: string;
+  minLength?: number;
+  maxLength?: number;
+  minimum?: number;
+  maximum?: number;
+  minItems?: number;
+  maxItems?: number;
+  minProperties?: number;
+  maxProperties?: number;
+  propertyNames?: JsonSchema;
+  required?: readonly string[];
+  properties?: Readonly<Record<string, JsonSchema>>;
+  items?: JsonSchema;
+  additionalProperties?: boolean | JsonSchema;
+  anyOf?: readonly JsonSchema[];
+  oneOf?: readonly JsonSchema[];
+  readOnly?: boolean;
+  writeOnly?: boolean;
+  "x-maxBytes"?: number;
+  "x-allowedProtocols"?: readonly string[];
+  "x-disallowUserInfo"?: boolean;
+  "x-disallowQuery"?: boolean;
+  "x-disallowFragment"?: boolean;
+  [extension: `x-${string}`]: unknown;
+};
+
 export type ProfileOwner = "kaseki" | "soyuz";
 export type ProfileQuestions = Record<string, DecisionQuestion>;
 
@@ -48,9 +83,9 @@ export interface DecisionProfile<
   readonly description: string;
   readonly owner: Owner;
   readonly version: string;
-  readonly allowedClients: readonly ClientIdentity[];
   readonly maxEvidenceBytes: number;
   readonly questions: Questions;
+  readonly inputSchema: JsonSchema;
   readonly validateInput: (value: unknown) => Input;
   readonly buildDecision: (input: Input) => {
     state: string | JsonObject;
@@ -89,6 +124,7 @@ export type ProfileEngineErrorCode =
   | "FORBIDDEN_PROFILE"
   | "INVALID_PROFILE_INPUT"
   | "PROFILE_INPUT_TOO_LARGE"
+  | "INVALID_PROFILE_CONFIGURATION"
   | "INVALID_PROFILE_OUTPUT"
   | "NOT_CONFIGURED";
 

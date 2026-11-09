@@ -1,7 +1,7 @@
 import type { DecisionAnswer, DecisionQuestion } from "../../contracts/decisions";
-import type { AnswersFor, DecisionProfile } from "../../contracts/profiles";
+import type { AnswersFor, DecisionProfile, JsonSchema } from "../../contracts/profiles";
 import { ProfileEngineError } from "../../contracts/profiles";
-import { allowedClientsForProfile, profileOwner } from "../../auth/permissions";
+import { profileOwner } from "../../auth/permissions";
 import { jsonState, requireEnum, requireOnlyKeys, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
 
 const PROFILE_ID = "run_operations_triage_v1" as const;
@@ -10,6 +10,30 @@ const RUN_STATUSES = [
   "completed", "failed", "admission_failed",
 ] as const;
 const OPERATIONAL_HEALTH = ["unknown", "healthy", "suspect_stalled"] as const;
+
+const inputSchema: JsonSchema = {
+  type: "object",
+  required: ["run"],
+  additionalProperties: false,
+  properties: {
+    run: {
+      type: "object",
+      required: ["status", "stage", "operationalHealth", "failureClass", "createdAt", "queuedAt", "startedAt", "completedAt", "lastHeartbeatAt"],
+      additionalProperties: false,
+      properties: {
+        status: { type: "string", enum: RUN_STATUSES },
+        stage: { type: ["string", "null"], minLength: 1, maxLength: 128, pattern: "\\S", "x-maxBytes": 128 },
+        operationalHealth: { type: "string", enum: OPERATIONAL_HEALTH },
+        failureClass: { type: ["string", "null"], minLength: 1, maxLength: 128, pattern: "\\S", "x-maxBytes": 128 },
+        createdAt: { type: "string", format: "date-time", pattern: "^\\d{4}-\\d{2}-\\d{2}T", maxLength: 64, "x-maxBytes": 64 },
+        queuedAt: { type: ["string", "null"], format: "date-time", pattern: "^\\d{4}-\\d{2}-\\d{2}T", maxLength: 64, "x-maxBytes": 64 },
+        startedAt: { type: ["string", "null"], format: "date-time", pattern: "^\\d{4}-\\d{2}-\\d{2}T", maxLength: 64, "x-maxBytes": 64 },
+        completedAt: { type: ["string", "null"], format: "date-time", pattern: "^\\d{4}-\\d{2}-\\d{2}T", maxLength: 64, "x-maxBytes": 64 },
+        lastHeartbeatAt: { type: ["string", "null"], format: "date-time", pattern: "^\\d{4}-\\d{2}-\\d{2}T", maxLength: 64, "x-maxBytes": 64 },
+      },
+    },
+  },
+};
 
 const questions = {
   needs_followup: {
@@ -96,9 +120,9 @@ export const runOperationsTriageProfile: DecisionProfile<
   description: "Assess retained Kaseki run operational metadata using Soyuz's approved projection.",
   owner: profileOwner(PROFILE_ID),
   version: "1",
-  allowedClients: allowedClientsForProfile(PROFILE_ID),
   maxEvidenceBytes: 12 * 1024,
   questions,
+  inputSchema,
   validateInput,
   buildDecision(input) {
     return {
