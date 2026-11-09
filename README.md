@@ -2,7 +2,7 @@
 
 Senku is a stateless Cloudflare Worker that provides bounded, typed JEV decisions to [Kaseki-Agent](https://github.com/CyanAutomation/kaseki-agent) and [Soyuz](https://github.com/CyanAutomation/soyuz). Callers send evidence; Senku owns the questions and profile contracts. Results are advisory, and each consumer keeps its deterministic policy and execution controls.
 
-**Phases 1 through 2C are implemented on main.** Senku exposes authenticated profile evaluation, permission-filtered REST and UTCP discovery, and identity-filtered OpenAPI 3.1. Phase 2D deployment readiness and the Soyuz Phase 3A code integration are in progress. Senku has not been deployed.
+**Phases 1 through 2C are implemented on main.** Senku exposes authenticated profile evaluation, permission-filtered REST and UTCP discovery, and identity-filtered OpenAPI 3.1. Phase 2D has a first health-checked Cloudflare deployment, but Senku remains not ready until its three production secrets are configured. The GitHub Actions deployment workflow deploys after a pull request merges to `main`; see [the deployment status](docs/PHASE-2D-DEPLOYMENT.md) and [development guide](docs/DEVELOPMENT.md) for setup and verification. Soyuz Phase 3A integration remains in progress.
 
 ## API
 
@@ -70,7 +70,7 @@ The current Worker uses bearer tokens. Soyuz's Service Binding client sends its 
 - Kaseki can store `-1` when a process exit is unavailable. Soyuz signal-derived values such as `143` are preserved. Output-review profiles accept `-1..255` and reject values outside that range.
 - The dedicated OpenRouter key should have a provider-side spending limit. Senku does not claim that a limit is configured.
 
-The service is configured with a 10 ms CPU limit, one outbound provider subrequest per evaluation, no database, and small bundles. Local timings are not production CPU measurements. Phase 2D deployment and live verification remain incomplete; see [docs/PHASE-2D-DEPLOYMENT.md](docs/PHASE-2D-DEPLOYMENT.md).
+The service makes one outbound provider subrequest per evaluation, has no database, and ships a small bundle. Cloudflare's account defaults apply because custom CPU and subrequest limits were rejected on the current Free plan. Local timings are not production CPU measurements. Phase 2D operational readiness and live verification remain incomplete; see [docs/PHASE-2D-DEPLOYMENT.md](docs/PHASE-2D-DEPLOYMENT.md).
 
 ## Local development
 

@@ -62,7 +62,7 @@ It sends one small synthetic decision using `~typesafe/jev-latest`, reports only
 
 Both machine tokens are required, must satisfy the strong-token format, and must differ. Any missing, invalid, or duplicate token configuration fails closed and makes `/readyz` return `not_ready`. A credential never identifies a caller through the request body, query string, or identity header. No CORS headers are enabled.
 
-When an operator authorizes Senku deployment, install the three secrets interactively:
+Install the three production secrets on the Cloudflare Worker, not in the GitHub Actions environment:
 
 ```sh
 npx wrangler secret put OPENROUTER_API_KEY
@@ -70,7 +70,7 @@ npx wrangler secret put SENKU_KASEKI_API_TOKEN
 npx wrangler secret put SENKU_SOYUZ_API_TOKEN
 ```
 
-The commands above are instructions only. No Senku secrets were set or deployment attempted for this implementation. Do not run `npm run deploy` as part of routine validation.
+These commands prompt for each value and deploy a new Worker version. Keep the three secret values out of GitHub Actions logs, Wrangler `vars`, and source control. Routine validation uses `npm run build` and does not deploy.
 
 The model alias remains `~typesafe/jev-latest`; Senku returns the resolved provider model identifier. There is one provider request per evaluation, no retry, no fallback, no per-profile model, and one allowed provider subrequest.
 
@@ -102,10 +102,19 @@ The dedicated Senku OpenRouter API key should have a provider-side spending limi
 
 ## Cloudflare Free-plan constraints
 
-Senku remains stateless with no D1, KV, R2, Queue, or Durable Object. It uses one outbound provider subrequest per evaluation, fixed URL/model, bounded payloads, and no automatic retries. The Wrangler configuration retains a 10 ms CPU limit. Local performance results are useful for relative comparisons but do not establish production CPU usage; measure deployed CPU only after a separate deployment decision.
+Senku remains stateless with no D1, KV, R2, Queue, or Durable Object. It uses one outbound provider subrequest per evaluation, fixed URL/model, bounded payloads, and no automatic retries. Cloudflare's account defaults apply because custom CPU and subrequest limits were rejected on the current Free plan. Local performance results are useful for relative comparisons but do not establish production CPU usage; measure deployed CPU after deployment.
 
-## CI and deployment gate
+## CI and deployment
 
-CI should run typecheck, tests with mocked provider responses, independent OpenAPI validation, and Wrangler's dry-run build. No live provider inference runs in routine CI. Before deploying, verify the intended Cloudflare account and Worker name, configure the trusted public base URL, two distinct machine secrets, and the dedicated OpenRouter secret; verify `/readyz`; inspect both identity-filtered discovery responses; and confirm the provider-side spending limit. This implementation did not configure secrets, deploy Senku, or verify spending controls. The current status and bounded deployment procedure are recorded in [PHASE-2D-DEPLOYMENT.md](PHASE-2D-DEPLOYMENT.md).
+The `CI` workflow runs typecheck, tests with mocked provider responses, OpenAPI validation, and Wrangler's dry-run build for pull requests. It does not make live provider calls. The `CodeQL` workflow analyzes JavaScript/TypeScript on pull requests, pushes to `main`, and weekly. Require both `verify` and `CodeQL / Analyze (javascript-typescript)` before merging into `main`. Workflow actions are pinned to commit SHAs; Dependabot checks for updates weekly.
+
+The `Deploy Worker` workflow runs after a pull request is merged into `main` and runs `npm ci` followed by `npm run deploy`, using the repository's `cloudflare` GitHub Actions environment. It checks out `main` and relies on the required pre-merge CI check instead of rerunning the test suite. The environment has no branch or tag restriction; the workflow trigger and merge condition limit deployments to merged pull requests targeting `main`. The environment has these entries:
+
+| GitHub Environment entry | Value |
+| --- | --- |
+| Variable `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID that owns the `senku` Worker |
+| Secret `CLOUDFLARE_API_TOKEN` | Account-scoped Cloudflare API token with Workers Editor permission |
+
+These credentials authorize Wrangler to deploy. They do not configure the Worker’s runtime secrets. Set `OPENROUTER_API_KEY`, `SENKU_KASEKI_API_TOKEN`, and `SENKU_SOYUZ_API_TOKEN` directly on the Cloudflare Worker as described above. Until all three are configured, `/readyz` remains `not_ready` even though a deployment can succeed. Keep the provider spending limit and post-deployment verification steps in [PHASE-2D-DEPLOYMENT.md](PHASE-2D-DEPLOYMENT.md) as production gates.
 
 Soyuz's Service Binding is a transport choice. Soyuz sends its dedicated bearer identity to the same authenticated REST profile route; Senku's existing identity and profile permission checks remain active.
