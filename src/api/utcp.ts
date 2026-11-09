@@ -166,9 +166,10 @@ export function projectJsonSchemaForUtcp(schema: JsonSchema): JsonSchema {
 
 function isLoopbackHostname(hostname: string): boolean {
   if (hostname === "localhost" || hostname === "[::1]") return true;
-  const octets = hostname.split(".").map(Number);
-  return octets.length === 4
-    && octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
+  const parts = hostname.split(".");
+  if (parts.length !== 4 || !parts.every((part) => /^\d+$/.test(part))) return false;
+  const octets = parts.map((part) => Number(part));
+  return octets.every((octet) => Number.isInteger(octet) && octet >= 0 && octet <= 255)
     && octets[0] === 127;
 }
 
