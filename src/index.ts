@@ -22,6 +22,8 @@ import { consoleLogger, safeLog, type Logger } from "./observability/log";
 export interface WorkerDependencies {
   fetchImpl?: typeof fetch;
   logger?: Logger;
+  /** Test seam for mapping manual-generation failures through the Worker error contract. */
+  serializeUtcpManual?: typeof serializeUtcpManual;
   /** Trusted internal identity seam for future server-side callers; never populated from request data. */
   resolveIdentity?: (request: Request, env: Environment) => Promise<AuthenticationResult>;
 }
@@ -144,6 +146,29 @@ function logFailure(
   });
 }
 
+function internalRouteFailure(
+  logger: Logger,
+  details: {
+    requestId: string;
+    clientId: ClientIdentity;
+    request: Request;
+    path: string;
+    started: number;
+  },
+): Response {
+  const error = new ApiError("INTERNAL_ERROR");
+  logFailure(logger, {
+    requestId: details.requestId,
+    clientId: details.clientId,
+    error,
+    method: details.request.method,
+    path: details.path,
+    workerDurationMs: elapsedMs(details.started),
+    event: "profile.request_failed",
+  });
+  return errorResponse(error, details.requestId);
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const prototype = Object.getPrototypeOf(value);
@@ -198,6 +223,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
 } {
   const fetchImpl = dependencies.fetchImpl ?? fetch;
   const logger = dependencies.logger ?? consoleLogger;
+  const serializeManual = dependencies.serializeUtcpManual ?? serializeUtcpManual;
   const resolveIdentity = dependencies.resolveIdentity
     ?? ((request: Request, env: Environment) => authenticateBearer(request.headers.get("authorization"), env));
 
@@ -268,12 +294,34 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         if (isProfileList) {
           return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
         }
-        if (isOpenApi) return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
+        if (isOpenApi) {
+          try {
+            return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
+          } catch {
+            return internalRouteFailure(logger, {
+              requestId: id,
+              clientId: authentication.clientId,
+              request,
+              path: logPath,
+              started,
+            });
+          }
+        }
         if (isUtcp) {
-          const manual = serializeUtcpManual(authentication.clientId, env.SENKU_PUBLIC_BASE_URL);
-          return manual
-            ? serializedJsonResponse(manual)
-            : errorResponse(new ApiError("NOT_CONFIGURED"), id);
+          try {
+            const manual = serializeManual(authentication.clientId, env.SENKU_PUBLIC_BASE_URL);
+            return manual
+              ? serializedJsonResponse(manual)
+              : errorResponse(new ApiError("NOT_CONFIGURED"), id);
+          } catch {
+            return internalRouteFailure(logger, {
+              requestId: id,
+              clientId: authentication.clientId,
+              request,
+              path: logPath,
+              started,
+            });
+          }
         }
 
         const profileId = profileIdFromPath((profileDetailMatch ?? profileEvaluationMatch)![1]);

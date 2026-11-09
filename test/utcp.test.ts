@@ -59,23 +59,23 @@ function providerResponse(request: DecisionRequest): Response {
   });
 }
 
-let activeTransport: { worker: ReturnType<typeof createWorker>; records: WorkerRequestRecord[] } | null = null;
-let fetchBridgeInstalled = false;
-
-function installWorkerFetchBridge(worker: ReturnType<typeof createWorker>, records: WorkerRequestRecord[]): void {
-  activeTransport = { worker, records };
-  if (fetchBridgeInstalled) return;
-
+function installWorkerFetchBridge(
+  worker: ReturnType<typeof createWorker>,
+  records: WorkerRequestRecord[],
+  env: Environment,
+): void {
+  // Each client gets a fetch stub that closes over its own Worker and request log.
+  vi.unstubAllGlobals();
   const originalFetch = globalThis.fetch;
   vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
     const url = new URL(request.url);
-    if (url.origin !== LOCAL_BASE_URL || !activeTransport) return originalFetch(input, init);
+    if (url.origin !== LOCAL_BASE_URL) return originalFetch(input, init);
 
     const body = request.method === "GET" || request.method === "HEAD" ? "" : await request.clone().text();
-    const response = await activeTransport.worker.fetch(request, environment);
+    const response = await worker.fetch(request, env);
     const responseBody = await response.clone().text();
-    activeTransport.records.push({
+    records.push({
       method: request.method,
       pathname: url.pathname,
       search: url.search,
@@ -87,12 +87,9 @@ function installWorkerFetchBridge(worker: ReturnType<typeof createWorker>, recor
     });
     return response;
   });
-  fetchBridgeInstalled = true;
 }
 
 afterEach(() => {
-  activeTransport = null;
-  fetchBridgeInstalled = false;
   vi.unstubAllGlobals();
 });
 
@@ -100,8 +97,9 @@ async function startClient(
   token: string,
   worker: ReturnType<typeof createWorker>,
   records: WorkerRequestRecord[],
+  env: Environment = environment,
 ): Promise<UtcpClient> {
-  installWorkerFetchBridge(worker, records);
+  installWorkerFetchBridge(worker, records, env);
   const serializer = new HttpCallTemplateSerializer();
   const manualTemplate = serializer.validateDict({
     name: "senku",
@@ -296,6 +294,25 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     expect(provider).not.toHaveBeenCalled();
   });
 
+  it("maps manual-generation failures to a safe structured error", async () => {
+    const logs: Array<Record<string, unknown>> = [];
+    const worker = createWorker({
+      logger: (record) => logs.push(record as Record<string, unknown>),
+      serializeUtcpManual: () => { throw new Error("private manual-generation detail"); },
+    });
+    const response = await worker.fetch(new Request("https://senku.test/utcp", {
+      headers: { authorization: `Bearer ${KASEKI_TOKEN}` },
+    }), environment);
+    const body = await response.text();
+
+    expect(response.status).toBe(500);
+    expect(JSON.parse(body)).toMatchObject({ error: { code: "INTERNAL_ERROR" } });
+    expect(body).not.toContain("private manual-generation detail");
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatchObject({ event: "profile.request_failed", path: "/utcp", errorCode: "INTERNAL_ERROR" });
+    expect(JSON.stringify(logs)).not.toContain("private manual-generation detail");
+  });
+
   it("fails closed for unsafe base URLs and bad envelopes, with no provider request", async () => {
     for (const invalid of [
       undefined,
@@ -305,6 +322,9 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
       "https://senku.example.com?token=secret",
       "https://senku.example.com#manual",
       "file:///tmp/senku",
+      "http://127.0.0.1e0",
+      "http://127.1e2.0.1",
+      "http://127..0.1",
     ]) {
       expect(trustedSenkuOrigin(invalid)).toBeNull();
       const response = await createWorker({ logger: () => undefined }).fetch(new Request("https://senku.test/utcp", {

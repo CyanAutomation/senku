@@ -41,15 +41,15 @@ The following values are measured with Node 26.13.0 from the local Workers runti
 | Identity | Endpoint | Cold wall time | Warm average | Response size |
 | --- | --- | ---: | ---: | ---: |
 | Kaseki | `/utcp` | 3 ms | below timer resolution | 20,015 bytes |
-| Soyuz | `/utcp` | 1 ms | below timer resolution | 25,757 bytes |
-| Kaseki | `/openapi.json` | 3 ms | 0.50 ms | 62,564 bytes |
-| Soyuz | `/openapi.json` | 1 ms | 0.25 ms | 74,879 bytes |
+| Soyuz | `/utcp` | 1 ms | 0.25 ms | 25,757 bytes |
+| Kaseki | `/openapi.json` | 2 ms | 0.25 ms | 62,564 bytes |
+| Soyuz | `/openapi.json` | 2 ms | 0.25 ms | 74,879 bytes |
 
 Additional profile discovery sizes: Kaseki `/v1/profiles` 603 bytes, task-admission contract 6,249 bytes, validation-recovery contract 2,977 bytes; Soyuz `/v1/profiles` 824 bytes, run-triage contract 3,985 bytes, output-review v1 3,406 bytes, and output-review v2 4,433 bytes. Discovery and contract generation made zero provider calls.
 
-One official-client invocation sample measured 30 ms for Kaseki and 4 ms for Soyuz, each with one mocked provider call. The Kaseki measurement was the first tool invocation in that client run; Soyuz followed after the HTTP plugin had already made a call. These are local single-sample end-to-end wall times, rounded to milliseconds, and do not represent billed CPU or a stable latency guarantee. The performance command serializes the two test files to reduce cross-test contention.
+One official-client invocation sample measured 25 ms for Kaseki and 4 ms for Soyuz, each with one mocked provider call. The Kaseki measurement was the first tool invocation in that client run; Soyuz followed after the HTTP plugin had already made a call. These are local single-sample end-to-end wall times, rounded to milliseconds, and do not represent billed CPU or a stable latency guarantee. The performance command serializes the two test files to reduce cross-test contention.
 
-The Wrangler dry-run reported a 114.02 KiB upload and 24.12 KiB gzip bundle. The UTCP SDK, HTTP plugin, and Redocly validator are development dependencies and are not bundled into the Worker. No allocation profiler was used; cold/warm wall-time comparisons and generated sizes are the local efficiency measurements available here.
+The Wrangler dry-run after review follow-ups reported a 115.19 KiB upload and 24.29 KiB gzip bundle. The UTCP SDK, HTTP plugin, and Redocly validator are development dependencies and are not bundled into the Worker. No allocation profiler was used; cold/warm wall-time comparisons and generated sizes are the local efficiency measurements available here.
 
 ## Security and operational policy
 
