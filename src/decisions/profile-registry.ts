@@ -1,6 +1,6 @@
 import type { ProfileMetadata } from "../contracts/profiles";
 import { ProfileEngineError, type AnyDecisionProfile } from "../contracts/profiles";
-import type { ProfileId } from "../auth/permissions";
+import { allowedClientsForProfile, PROFILE_CLIENT_PERMISSIONS, type ClientIdentity, type ProfileId } from "../auth/permissions";
 import { runOperationsTriageProfile } from "../profiles/soyuz/run-operations-triage";
 import { kasekiOutputReviewV1Profile } from "../profiles/soyuz/output-review-v1";
 import { kasekiOutputReviewV2Profile } from "../profiles/soyuz/output-review-v2";
@@ -28,7 +28,7 @@ function metadata(profile: AnyDecisionProfile): ProfileMetadata {
     description: profile.description,
     owner: profile.owner,
     version: profile.version,
-    allowedClients: profile.allowedClients,
+    allowedClients: allowedClientsForProfile(profile.id as ProfileId),
     maxEvidenceBytes: profile.maxEvidenceBytes,
     questionCount: Object.keys(profile.questions).length,
   };
@@ -41,6 +41,12 @@ export class DecisionProfileRegistry {
     const registered = new Map<string, AnyDecisionProfile>();
     for (const profile of profiles) {
       if (registered.has(profile.id)) throw new ProfileEngineError("DUPLICATE_PROFILE");
+      const policy = Object.hasOwn(PROFILE_CLIENT_PERMISSIONS, profile.id)
+        ? PROFILE_CLIENT_PERMISSIONS[profile.id as ProfileId]
+        : undefined;
+      if (!policy || !(policy as readonly ClientIdentity[]).includes(profile.owner)) {
+        throw new ProfileEngineError("INVALID_PROFILE_CONFIGURATION");
+      }
       registered.set(profile.id, profile);
     }
     this.profiles = registered;
