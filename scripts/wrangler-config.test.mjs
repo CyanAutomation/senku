@@ -7,3 +7,7 @@ const config = JSON.parse(await readFile(new URL("../wrangler.jsonc", import.met
 test("production Wrangler config keeps Worker Preview URLs disabled", () => {
   assert.equal(config.preview_urls, false);
 });
+
+test("production Wrangler config preserves Worker invocation logs", () => {
+  assert.equal(config.observability?.logs?.invocation_logs, true);
+});
