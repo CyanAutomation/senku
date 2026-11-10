@@ -4,6 +4,7 @@ import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolvePro
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 
+// Contract basis: docs/PHASE-1-DECISIONS.md, provider response normalization and metadata policy.
 const request = kasekiRequest as unknown as DecisionRequest;
 const config: ProviderConfig & { ok: true } = {
   ok: true,
@@ -121,16 +122,9 @@ describe("OpenRouter Decisions adapter", () => {
     }
   });
 
-  it("ignores source annotations without exposing or storing them", async () => {
-    const body = providerBody({ annotations: [{ url: "https://example.test/source", title: "Source", excerpt: "bounded context" }] });
-    const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
-    expect(result.model).toBe(body.model);
-    expect("annotations" in result).toBe(false);
-  });
-
-  it("ignores additive provider envelope metadata and projects only recognized usage fields", async () => {
+  it("keeps validated answers and recognized usage while dropping provider-only metadata", async () => {
     const body = providerBody({
-      annotations: null,
+      annotations: [{ url: "https://example.test/source", title: "Source", excerpt: "provider-only context" }],
       provider: { name: "TypeSafe", route: "new-provider-metadata" },
       future_response_field: { nested: [1, 2, 3] },
       usage: {
@@ -142,8 +136,12 @@ describe("OpenRouter Decisions adapter", () => {
       },
     });
     const result = await requestOpenRouterDecision(request, config, async () => jsonResponse(body));
+    expect(result.model).toBe(body.model);
+    expect(result.answers.safe_to_retry).toMatchObject({ type: "noul", noul: 0.91 });
     expect(result.usage).toEqual({ input_tokens: 420, output_tokens: 30, cost: 0.0001 });
-    expect("annotations" in result).toBe(false);
+    expect(result).not.toHaveProperty("annotations");
+    expect(result).not.toHaveProperty("provider");
+    expect(result).not.toHaveProperty("future_response_field");
   });
 
   it("omits malformed optional usage metadata without rejecting validated answers", async () => {
