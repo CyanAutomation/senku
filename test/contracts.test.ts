@@ -4,13 +4,28 @@ import { validateDecisionRequest } from "../src/contracts/validation";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 import { soyuzRequest } from "./fixtures/soyuz-request";
 
+// Contract basis: docs/PHASE-1-DECISIONS.md, consumer compatibility and request validation.
 describe("decision request contract", () => {
   it("accepts the Kaseki fixture with object state, nullable criteria, and all three JEV primitives", () => {
-    expect(validateDecisionRequest(kasekiRequest).ok).toBe(true);
+    expect(validateDecisionRequest(kasekiRequest)).toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: "1",
+        state: kasekiRequest.state,
+        questions: kasekiRequest.questions,
+      },
+    });
   });
 
   it("accepts the Soyuz fixture with string state and both binary criteria", () => {
-    expect(validateDecisionRequest(soyuzRequest).ok).toBe(true);
+    expect(validateDecisionRequest(soyuzRequest)).toMatchObject({
+      ok: true,
+      value: {
+        schemaVersion: "1",
+        state: soyuzRequest.state,
+        questions: soyuzRequest.questions,
+      },
+    });
   });
 
   it("accepts structured Kaseki instructions and criteria content", () => {
@@ -38,7 +53,7 @@ describe("decision request contract", () => {
         },
       },
     };
-    expect(validateDecisionRequest(request).ok).toBe(true);
+    expect(validateDecisionRequest(request)).toMatchObject({ ok: true, value: request });
   });
 
   it("rejects missing and non-string schema versions", () => {

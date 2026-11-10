@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SCHEMA_VERSION, type DecisionRequest } from "../src/contracts/decisions";
 import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolveProviderConfig } from "../src/providers/openrouter/decisions";
 
+// Optional paid integration: docs/DEVELOPMENT.md, Optional live provider smoke test.
 const syntheticRequest: DecisionRequest = {
   schemaVersion: SCHEMA_VERSION,
   state: { source: "manual_live_smoke", note: "Synthetic non-sensitive provider compatibility check." },
@@ -43,7 +44,14 @@ describe("explicit live OpenRouter provider smoke test", () => {
         usage: result.usage,
         attemptCount: 1,
       }));
-      expect(result.answers.smoke_check.type).toBe("noul");
+      expect(result.model).toMatch(/^typesafe\/jev-/);
+      const answer = result.answers.smoke_check;
+      expect(answer.type).toBe("noul");
+      if (answer.type !== "noul") throw new Error("Live provider returned the wrong answer type.");
+      expect(answer.noul).toBeGreaterThanOrEqual(0);
+      expect(answer.noul).toBeLessThanOrEqual(1);
+      expect(answer.probabilities.true).toBeCloseTo(answer.noul, 12);
+      expect(answer.probabilities.false).toBeCloseTo(1 - answer.noul, 12);
     } catch (error) {
       throw new Error(error instanceof ProviderError ? error.code : "OpenRouter smoke test failed.");
     }
