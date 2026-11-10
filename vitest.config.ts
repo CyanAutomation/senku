@@ -9,7 +9,7 @@ export default defineConfig({
   ],
   test: {
     include: ["test/**/*.test.ts"],
-    exclude: ["test/openapi-standards.test.ts"],
+    exclude: ["test/openapi-standards.test.ts", "test/performance.smoke.test.ts"],
     globals: false,
   },
 });

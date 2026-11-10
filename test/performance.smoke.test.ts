@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
 import { LIMITS, type DecisionRequest, type Environment } from "../src/contracts/decisions";
+import type { ProfileId } from "../src/auth/permissions";
+import { profileRegistry } from "../src/decisions/profile-registry";
 
 const environment: Environment = {
   OPENROUTER_API_KEY: "performance-test-key",
@@ -11,6 +13,7 @@ const environment: Environment = {
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
 
+// Operational purpose: docs/DEVELOPMENT.md, Commands. Timings are diagnostic, not pass/fail budgets.
 function questions(count: number) {
   return Object.fromEntries(Array.from({ length: count }, (_unused, index) => [
     "question_" + index,
@@ -86,7 +89,25 @@ describe("bounded request performance smoke", () => {
           responseBytes = new TextEncoder().encode(body).byteLength;
           expect(response.status).toBe(200);
           expect(response.headers.get("cache-control")).toBe("no-store");
-          expect(JSON.parse(body)).toBeDefined();
+
+          const document = JSON.parse(body) as Record<string, unknown>;
+          if (endpoint === "/v1/profiles") {
+            const profileIds = (document.profiles as Array<{ id: string }>).map((profile) => profile.id).sort();
+            expect(profileIds).toEqual([...scenario.profiles].sort());
+          } else if (endpoint === "/utcp") {
+            const toolProfileIds = (document.tools as Array<{ tool_call_template: { url: string } }>).map((tool) => {
+              const match = /\/v1\/profiles\/([a-z0-9_]+)\/evaluate$/.exec(tool.tool_call_template.url);
+              expect(match).not.toBeNull();
+              return match![1];
+            }).sort();
+            expect(toolProfileIds).toEqual([...scenario.profiles].sort());
+          } else if (endpoint === "/openapi.json") {
+            const paths = document.paths as Record<string, unknown>;
+            expect(paths).toHaveProperty("/v1/profiles/{profileId}/evaluate");
+            expect(Object.hasOwn(paths, "/v1/decisions")).toBe(scenario.identity === "kaseki");
+          } else {
+            expect(document.id).toBe(endpoint.split("/").at(-1));
+          }
         }
         results.push({
           identity: scenario.identity,
@@ -108,7 +129,7 @@ describe("bounded request performance smoke", () => {
     expect(results).toHaveLength(11);
   });
 
-  it("exercises small, typical, and upper-bound payloads in the Workers runtime", async () => {
+  it("accepts small, typical, and maximum-sized requests with matching answer envelopes", async () => {
     const makeBody = (questionCount: number, state: string | Record<string, unknown>) => JSON.stringify({
       schemaVersion: "1",
       state,
@@ -125,9 +146,9 @@ describe("bounded request performance smoke", () => {
       state: "x".repeat(LIMITS.requestBytes - baseSize),
     });
     const scenarios = [
-      { name: "small", body: makeBody(1, { status: "failed", exitCode: 1 }) },
-      { name: "typical", body: makeBody(8, { status: "failed", failureSummary: "Temporary timeout", evidence: "x".repeat(3_000) }) },
-      { name: "upper-bound", body: upperBody },
+      { name: "small", body: makeBody(1, { status: "failed", exitCode: 1 }), questionCount: 1 },
+      { name: "typical", body: makeBody(8, { status: "failed", failureSummary: "Temporary timeout", evidence: "x".repeat(3_000) }), questionCount: 8 },
+      { name: "upper-bound", body: upperBody, questionCount: LIMITS.questions },
     ];
     const worker = createWorker({
       fetchImpl: async (_input, init) => mockedProviderResponse(JSON.parse(String(init?.body)) as DecisionRequest),
@@ -138,6 +159,7 @@ describe("bounded request performance smoke", () => {
     for (const scenario of scenarios) {
       const requestBytes = new TextEncoder().encode(scenario.body).byteLength;
       expect(requestBytes).toBeLessThanOrEqual(LIMITS.requestBytes);
+      if (scenario.name === "upper-bound") expect(requestBytes).toBe(LIMITS.requestBytes);
       const elapsed: number[] = [];
       for (let run = 0; run < 3; run += 1) {
         const started = performance.now();
@@ -150,6 +172,13 @@ describe("bounded request performance smoke", () => {
           body: scenario.body,
         }), environment);
         expect(response.status).toBe(200);
+        const responseBody = await response.json() as {
+          status: string;
+          attemptCount: number;
+          answers: Record<string, unknown>;
+        };
+        expect(responseBody).toMatchObject({ status: "completed", attemptCount: 1 });
+        expect(Object.keys(responseBody.answers)).toHaveLength(scenario.questionCount);
         elapsed.push(performance.now() - started);
       }
       results.push({
@@ -221,6 +250,7 @@ describe("bounded request performance smoke", () => {
       const body = JSON.stringify({ schemaVersion: "1", input: scenario.input });
       const requestBytes = new TextEncoder().encode(body).byteLength;
       expect(requestBytes).toBeLessThanOrEqual(LIMITS.requestBytes);
+      const profile = profileRegistry.getProfile(scenario.id as ProfileId);
       const elapsed: number[] = [];
       for (let run = 0; run < 3; run += 1) {
         const started = performance.now();
@@ -230,11 +260,30 @@ describe("bounded request performance smoke", () => {
           body,
         }), environment);
         expect(response.status).toBe(200);
-        const responseBody = await response.json() as { attemptCount: number };
-        expect(responseBody.attemptCount).toBe(1);
+        const responseBody = await response.json() as {
+          schemaVersion: string;
+          status: string;
+          profileId: string;
+          answers: Record<string, unknown>;
+          attemptCount: number;
+        };
+        expect(responseBody).toMatchObject({
+          schemaVersion: "1",
+          status: "completed",
+          profileId: scenario.id,
+          attemptCount: 1,
+        });
+        expect(Object.keys(responseBody.answers).sort()).toEqual(Object.keys(profile.questions).sort());
         elapsed.push(performance.now() - started);
       }
       const lastLog = logs.at(-1)!;
+      expect(lastLog).toMatchObject({
+        event: "profile.evaluation_completed",
+        profileId: scenario.id,
+        attemptCount: 1,
+        questionCount: Object.keys(profile.questions).length,
+      });
+      expect(Number(lastLog.evidenceBytes)).toBeLessThanOrEqual(profile.maxEvidenceBytes);
       results.push({
         profileId: scenario.id,
         requestBytes,
@@ -255,6 +304,6 @@ describe("bounded request performance smoke", () => {
       results,
     }));
     expect(results).toHaveLength(5);
-    expect(results.find((item) => item.profileId === "task_admission_v1")!.evidenceBytes).toBeLessThanOrEqual(32 * 1024);
+    expect(results.map((item) => item.profileId).sort()).toEqual(scenarios.map((item) => item.id).sort());
   });
 });

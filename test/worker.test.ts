@@ -85,11 +85,24 @@ describe("Worker routes and decision orchestration", () => {
     expect(response.headers.get("access-control-allow-origin")).toBeNull();
   });
 
-  it("accepts both sanitized Kaseki and Soyuz input fixtures without changing their meaning", async () => {
+  it("forwards both consumer fixtures to JEV without changing question meaning", async () => {
     for (const fixture of [kasekiRequest, soyuzRequest]) {
-      const response = await createTestWorker(async (_input, init) => providerResponse(JSON.parse(String(init?.body)) as DecisionRequest))
+      const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+        providerResponse(JSON.parse(String(init?.body)) as DecisionRequest));
+      const response = await createTestWorker(fetchImpl)
         .fetch(request(JSON.stringify(fixture), { authorization: "Bearer test-client-token-0123456789abcdef", contentType: "application/json" }), env);
       expect(response.status).toBe(200);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+
+      const providerRequest = JSON.parse(String(fetchImpl.mock.calls[0][1]?.body)) as DecisionRequest;
+      expect(providerRequest.state).toEqual(fixture.state);
+      expect(providerRequest.questions).toEqual(fixture.questions);
+
+      const body = await response.json() as { answers: Record<string, { type: string }> };
+      expect(Object.keys(body.answers).sort()).toEqual(Object.keys(fixture.questions).sort());
+      for (const [questionId, question] of Object.entries(fixture.questions)) {
+        expect(body.answers[questionId].type).toBe(question.type);
+      }
     }
   });
 

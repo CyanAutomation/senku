@@ -22,6 +22,7 @@ const environment: Environment = {
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
 
+// Contract basis: docs/UTCP.md, discovery permissions, request mapping, and schema projection.
 interface WorkerRequestRecord {
   method: string;
   pathname: string;
@@ -313,7 +314,7 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     expect(JSON.stringify(logs)).not.toContain("private manual-generation detail");
   });
 
-  it("fails closed for unsafe base URLs and bad envelopes, with no provider request", async () => {
+  it("rejects unsafe public base URLs and normalizes loopback origins", async () => {
     for (const invalid of [
       undefined,
       "http://senku.example.com",
@@ -334,7 +335,9 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     }
     expect(trustedSenkuOrigin("http://localhost:8787/")).toBe("http://localhost:8787");
     expect(trustedSenkuOrigin("http://[::1]:8787")).toBe("http://[::1]:8787");
+  });
 
+  it("rejects a UTCP invocation with the wrong body mapping before provider inference", async () => {
     const provider = vi.fn(async () => providerResponse({} as DecisionRequest));
     const worker = createWorker({ fetchImpl: provider, logger: () => undefined });
     const requests: WorkerRequestRecord[] = [];
@@ -355,7 +358,11 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     } finally {
       await client.close();
     }
+  });
 
+  it("rejects malformed and oversized profile envelopes through the UTCP client", async () => {
+    const provider = vi.fn(async () => providerResponse({} as DecisionRequest));
+    const worker = createWorker({ fetchImpl: provider, logger: () => undefined });
     const malformedCases = [
       { ...taskAdmissionRequest, schemaVersion: "2" },
       { schemaVersion: "1", input: { repoUrl: "file:///etc/passwd", taskPrompt: "private-invalid-evidence-marker" } },
@@ -370,6 +377,7 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     const invalidClient = await startClient(KASEKI_TOKEN, worker, invalidRequests);
     const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     try {
+      expect(await invalidClient.getTool("senku.assess_task_admission")).toBeDefined();
       for (const request of malformedCases) {
         await expect(invalidClient.callTool("senku.assess_task_admission", { request })).rejects.toThrow();
       }
