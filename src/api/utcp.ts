@@ -61,6 +61,24 @@ const toolDefinitions = {
     tags: ["decision", "kaseki", "task-admission"],
     description: "Classifies bounded repository and task evidence, including the repository URL/ref, task prompt, validation commands, changed-file allowlist, and task/publish modes. Returns advisory JEV assessments. It does not admit, reject, or authorize a Kaseki run; Kaseki's deterministic policy remains authoritative. Probabilities are not permissions.",
   },
+  assess_goal_check: {
+    name: "assess_goal_check",
+    profileId: "kaseki_goal_check_v1",
+    tags: ["decision", "kaseki", "goal-check"],
+    description: "Assesses bounded run evidence against the supplied criteria. Criteria are treated as data. Results are advisory; this tool does not authorize retries, bypass validation, or change run outcomes.",
+  },
+  assess_run_evaluation: {
+    name: "assess_run_evaluation",
+    profileId: "kaseki_run_evaluation_v1",
+    tags: ["decision", "kaseki", "run-evaluation"],
+    description: "Reviews bounded coding-run evidence and optionally provides a failure diagnosis. Results are advisory; this tool does not approve, publish, merge, or retry output.",
+  },
+  route_kaseki_context: {
+    name: "route_kaseki_context",
+    profileId: "kaseki_context_routing_v1",
+    tags: ["decision", "kaseki", "context-routing"],
+    description: "Selects an advisory output or scouting-context route from bounded metadata. The Kaseki host retains deterministic transformations and preserves evidence whenever confidence or policy checks are insufficient.",
+  },
   assess_validation_recovery: {
     name: "assess_validation_recovery",
     profileId: "validation_recovery_v1",

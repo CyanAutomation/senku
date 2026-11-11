@@ -14,6 +14,9 @@ const inputs: Record<ProfileId, unknown> = {
   kaseki_output_review_v1: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." },
   kaseki_output_review_v2: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: null },
   task_admission_v1: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated REST API." },
+  kaseki_goal_check_v1: { state: { evidence: "bounded" }, criteria: [{ id: "criterion_1", criterion: "The goal is met." }] },
+  kaseki_run_evaluation_v1: { state: { evidence: "bounded" }, includeFailureDiagnosis: false },
+  kaseki_context_routing_v1: { mode: "tool_output", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false } },
   validation_recovery_v1: { command: "npm test", exitCode: 1, output: "Assertion failed." },
 };
 
@@ -68,7 +71,7 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
   it("documents every profile contract only for identities permitted to use it", () => {
     const kasekiIds = listPublicProfiles("kaseki").map((item) => item.id);
     const soyuzIds = listPublicProfiles("soyuz").map((item) => item.id);
-    expect(kasekiIds).toEqual(["task_admission_v1", "validation_recovery_v1"]);
+    expect(kasekiIds).toEqual(["task_admission_v1", "kaseki_goal_check_v1", "kaseki_run_evaluation_v1", "kaseki_context_routing_v1", "validation_recovery_v1"]);
     expect(soyuzIds).toEqual(["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"]);
     expect(kasekiIds).not.toContain("run_operations_triage_v1");
     expect(soyuzIds).not.toContain("task_admission_v1");
@@ -77,9 +80,11 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
       const contract = getPublicProfileContract(id);
       const profile = profileRegistry.getProfile(id);
       expect(contract.inputSchema).toEqual(profile.inputSchema);
-      expect(contract.outputSchema).toMatchObject({ type: "object", required: Object.keys(profile.questions) });
+      expect(contract.outputSchema).toMatchObject(profile.dynamicQuestions
+        ? { type: "object", additionalProperties: expect.any(Object) }
+        : { type: "object", required: Object.keys(profile.questions) });
       expect(contract.limits.maxEvidenceBytes).toBe(profile.maxEvidenceBytes);
-      expect(contract.questionCount).toBe(Object.keys(profile.questions).length);
+      expect(contract.questionCount).toBe(profile.maxQuestionCount ?? Object.keys(profile.questions).length);
       expect(PROFILE_CLIENT_PERMISSIONS[id as ProfileId]).toContain(profile.owner);
     }
   });

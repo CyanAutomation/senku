@@ -22,12 +22,15 @@ Senku projects profile contracts into the JSON Schema vocabulary carried by UTCP
 | Tool | Profile | Identity | Route |
 | --- | --- | --- | --- |
 | `assess_task_admission` | `task_admission_v1` | Kaseki | `POST /v1/profiles/task_admission_v1/evaluate` |
+| `assess_goal_check` | `kaseki_goal_check_v1` | Kaseki | `POST /v1/profiles/kaseki_goal_check_v1/evaluate` |
+| `assess_run_evaluation` | `kaseki_run_evaluation_v1` | Kaseki | `POST /v1/profiles/kaseki_run_evaluation_v1/evaluate` |
+| `route_kaseki_context` | `kaseki_context_routing_v1` | Kaseki | `POST /v1/profiles/kaseki_context_routing_v1/evaluate` |
 | `assess_validation_recovery` | `validation_recovery_v1` | Kaseki | `POST /v1/profiles/validation_recovery_v1/evaluate` |
 | `triage_run_evidence` | `run_operations_triage_v1` | Soyuz | `POST /v1/profiles/run_operations_triage_v1/evaluate` |
 | `review_kaseki_output_v1` | `kaseki_output_review_v1` | Soyuz | `POST /v1/profiles/kaseki_output_review_v1/evaluate` |
 | `review_kaseki_output_v2` | `kaseki_output_review_v2` | Soyuz | `POST /v1/profiles/kaseki_output_review_v2/evaluate` |
 
-Kaseki receives exactly the first two tools; Soyuz receives exactly the last three. The generic `POST /v1/decisions` endpoint is deliberately excluded because it accepts trusted dynamic questions. There is no query parameter to select an identity. The central permission matrix applies again when each REST route is invoked.
+Kaseki receives exactly the first five tools; Soyuz receives exactly the last three. The generic `POST /v1/decisions` endpoint is deliberately excluded because it accepts trusted dynamic questions. There is no query parameter to select an identity. The central permission matrix applies again when each REST route is invoked.
 
 Tool descriptions explain their bounded evidence, advisory result, limitations, and the fact that probabilities do not grant operational permission. These tools do not admit runs, execute commands, approve retries, change run state, publish branches, or merge pull requests. The consumer retains deterministic authority.
 

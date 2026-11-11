@@ -56,8 +56,15 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
     state: decision.state,
     questions: decision.questions,
   };
+  if (utf8Size(JSON.stringify(request)) > LIMITS.requestBytes) {
+    throw new ProfileEngineError("PROFILE_INPUT_TOO_LARGE");
+  }
   const validation = validateDecisionRequest(request);
   if (!validation.ok) throw new ProfileEngineError("INVALID_PROFILE_CONFIGURATION");
+  const maxQuestionCount = profile.maxQuestionCount ?? LIMITS.questions;
+  if (Object.keys(decision.questions).length > maxQuestionCount) {
+    throw new ProfileEngineError("INVALID_PROFILE_CONFIGURATION");
+  }
 
   const evidenceBytes = typeof decision.state === "string"
     ? utf8Size(decision.state)
@@ -84,7 +91,7 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
   }
 
   const durationMs = Math.max(0, Math.round(performance.now() - started));
-  const result = profile.validateOutput(providerResult.answers);
+  const result = profile.validateOutput(providerResult.answers, validatedInput);
   return {
     profileId: profile.id,
     profileVersion: profile.version,

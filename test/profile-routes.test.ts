@@ -68,6 +68,9 @@ const scenarios = [
   { id: "kaseki_output_review_v1", token: SOYUZ_TOKEN, input: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." } },
   { id: "kaseki_output_review_v2", token: SOYUZ_TOKEN, input: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." } },
   { id: "task_admission_v1", token: KASEKI_TOKEN, input: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated profile REST API." } },
+  { id: "kaseki_goal_check_v1", token: KASEKI_TOKEN, input: { state: { diff: "updated src/worker.ts" }, criteria: [{ id: "criterion_1", criterion: "The worker handles cancellation." }] } },
+  { id: "kaseki_run_evaluation_v1", token: KASEKI_TOKEN, input: { state: { validation: "npm test passed" }, includeFailureDiagnosis: false } },
+  { id: "kaseki_context_routing_v1", token: KASEKI_TOKEN, input: { mode: "tool_output", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false } } },
   { id: "validation_recovery_v1", token: KASEKI_TOKEN, input: { command: "npm test", exitCode: 1, output: "Assertion failed." } },
 ] as const;
 
@@ -106,7 +109,9 @@ describe("authenticated profile REST routes", () => {
     const kasekiBody = await kaseki.json() as { profiles: Array<{ id: string }> };
     expect(kaseki.status).toBe(200);
     expect(kaseki.headers.get("cache-control")).toBe("no-store");
-    expect(kasekiBody.profiles.map((profile) => profile.id)).toEqual(["task_admission_v1", "validation_recovery_v1"]);
+    expect(kasekiBody.profiles.map((profile) => profile.id)).toEqual([
+      "task_admission_v1", "kaseki_goal_check_v1", "kaseki_run_evaluation_v1", "kaseki_context_routing_v1", "validation_recovery_v1",
+    ]);
 
     const soyuz = await worker.fetch(request("/v1/profiles", { token: SOYUZ_TOKEN }), env);
     const soyuzBody = await soyuz.json() as { profiles: Array<{ id: string }> };

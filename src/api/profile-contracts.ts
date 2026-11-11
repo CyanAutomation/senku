@@ -11,6 +11,7 @@ export interface PublicProfileMetadata {
   description: string;
   owner: "kaseki" | "soyuz";
   questionCount: number;
+  dynamicQuestions: boolean;
   maxEvidenceBytes: number;
   operations: ["evaluate"];
 }
@@ -33,6 +34,10 @@ function registeredProfileMetadata(identity: ClientIdentity): Array<{ metadata: 
     .map((metadata) => ({ metadata, profile: profileRegistry.getProfile(metadata.id) }));
 }
 
+function profileQuestionCount(profile: AnyDecisionProfile): number {
+  return profile.maxQuestionCount ?? Object.keys(profile.questions).length;
+}
+
 export function listPublicProfiles(identity: ClientIdentity): PublicProfileMetadata[] {
   return registeredProfileMetadata(identity).map(({ metadata }) => ({
     id: metadata.id,
@@ -41,6 +46,7 @@ export function listPublicProfiles(identity: ClientIdentity): PublicProfileMetad
     description: metadata.description,
     owner: metadata.owner,
     questionCount: metadata.questionCount,
+    dynamicQuestions: metadata.dynamicQuestions,
     maxEvidenceBytes: metadata.maxEvidenceBytes,
     operations: ["evaluate"],
   }));
@@ -48,7 +54,7 @@ export function listPublicProfiles(identity: ClientIdentity): PublicProfileMetad
 
 export function getPublicProfileContract(profileId: string): PublicProfileContract {
   const profile = profileRegistry.getProfile(profileId);
-  const questionCount = Object.keys(profile.questions).length;
+  const questionCount = profileQuestionCount(profile);
   return {
     schemaVersion: SCHEMA_VERSION,
     id: profile.id,
@@ -57,6 +63,7 @@ export function getPublicProfileContract(profileId: string): PublicProfileContra
     description: profile.description,
     owner: profile.owner,
     questionCount,
+    dynamicQuestions: profile.dynamicQuestions === true,
     maxEvidenceBytes: profile.maxEvidenceBytes,
     operations: ["evaluate"],
     inputSchema: profile.inputSchema,
@@ -147,6 +154,15 @@ function questionAnswerSchema(question: DecisionQuestion): JsonSchema {
 }
 
 export function profileAnswersSchema(profile: AnyDecisionProfile): JsonSchema {
+  if (profile.dynamicQuestions) {
+    return {
+      type: "object",
+      minProperties: 1,
+      maxProperties: profile.maxQuestionCount ?? LIMITS.questions,
+      propertyNames: { pattern: profile.answerIdPattern ?? "^[a-z][a-z0-9_]{0,63}$" },
+      additionalProperties: canonicalAnswerSchema(),
+    };
+  }
   return {
     type: "object",
     required: Object.keys(profile.questions),

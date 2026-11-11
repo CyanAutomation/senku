@@ -17,7 +17,7 @@ Senku is a stateless Cloudflare Worker that provides bounded, typed JEV decision
 | `GET` | `/healthz` | Public liveness check |
 | `GET` | `/readyz` | Public configuration readiness check |
 
-The five registered profiles are `task_admission_v1` and `validation_recovery_v1` for Kaseki, and `run_operations_triage_v1`, `kaseki_output_review_v1`, and `kaseki_output_review_v2` for Soyuz. See [docs/PROFILES.md](docs/PROFILES.md) for inputs, limits, and outputs.
+The eight registered profiles include five Kaseki profiles: `task_admission_v1`, `kaseki_goal_check_v1`, `kaseki_run_evaluation_v1`, `kaseki_context_routing_v1`, and `validation_recovery_v1`. Soyuz has `run_operations_triage_v1`, `kaseki_output_review_v1`, and `kaseki_output_review_v2`. See [docs/PROFILES.md](docs/PROFILES.md) for inputs, limits, and outputs.
 
 Profile evaluation uses a versioned evidence envelope:
 
@@ -51,9 +51,9 @@ curl https://senku.example.workers.dev/v1/profiles/run_operations_triage_v1/eval
 
 Configure two separate strong machine tokens: `SENKU_KASEKI_API_TOKEN` and `SENKU_SOYUZ_API_TOKEN`. Each must contain 32–1,024 printable ASCII characters, and the values must differ. Missing, malformed, or duplicate token configuration fails closed and keeps `/readyz` at `not_ready`. Identity comes from the matched bearer credential. Body fields and identity headers do not select a client.
 
-Kaseki may call the generic endpoint and its two profiles. Soyuz may call its three profiles and cannot call generic decisions. Authenticated responses use `Cache-Control: no-store`. Senku does not enable CORS.
+Kaseki may call the generic endpoint and its five profiles. Soyuz may call its three profiles and cannot call generic decisions. Kaseki workflow questions use profiles; the generic route remains for its explicitly requested gateway evaluation smoke check. Authenticated responses use `Cache-Control: no-store`. Senku does not enable CORS.
 
-`GET /utcp` uses the same bearer identity and central permission matrix. Kaseki discovers two profile tools; Soyuz discovers three. Every tool calls its existing profile REST route. The manual never exposes `POST /v1/decisions` or credentials. See [docs/UTCP.md](docs/UTCP.md) for client setup and body mapping.
+`GET /utcp` uses the same bearer identity and central permission matrix. Kaseki discovers five profile tools; Soyuz discovers three. Every tool calls its existing profile REST route. The manual never exposes `POST /v1/decisions` or credentials. See [docs/UTCP.md](docs/UTCP.md) for client setup and body mapping.
 
 The current Worker uses bearer tokens. Soyuz's Service Binding client sends its dedicated bearer identity through the same authenticated profile routes; Senku's central permission policy remains unchanged.
 
