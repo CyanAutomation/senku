@@ -1,8 +1,8 @@
 # Decision profile contracts
 
-The profile engine exposes five server-owned, versioned contracts through `POST /v1/profiles/{profileId}/evaluate`. Callers send evidence inside `{ "schemaVersion": "1", "input": ... }`; Senku constructs the JEV questions and keeps provider calls, validation, and permissions centralized. `GET /v1/profiles` discovers only permitted profiles. `GET /v1/profiles/{profileId}` returns the permitted profile's machine-readable input/output schemas and limits. The authenticated `/openapi.json` document uses the same schemas.
+The profile engine exposes eight server-owned, versioned contracts through `POST /v1/profiles/{profileId}/evaluate`. Callers send evidence inside `{ "schemaVersion": "1", "input": ... }`; Senku constructs the JEV questions and keeps provider calls, validation, and permissions centralized. `GET /v1/profiles` discovers only permitted profiles. `GET /v1/profiles/{profileId}` returns the permitted profile's machine-readable input/output schemas and limits. The authenticated `/openapi.json` document uses the same schemas.
 
-No profile accepts caller-supplied questions, criteria, provider URLs, or model names. No profile result authorises a task, retry, code change, publication, queue transition, or other side effect. Kaseki and Soyuz continue to enforce their own deterministic policies.
+Profiles never accept caller-supplied question definitions, provider URLs, or model names. The goal-check profile accepts bounded success criteria as evidence and Senku constructs the corresponding questions. No profile result authorises a task, retry, code change, publication, queue transition, or other side effect. Kaseki and Soyuz continue to enforce their own deterministic policies.
 
 ## Profiles and limits
 
@@ -12,6 +12,9 @@ No profile accepts caller-supplied questions, criteria, provider URLs, or model 
 | `kaseki_output_review_v1` | Soyuz | Canonical run status, failure class, exit code, changed-file count, summary up to 2,000 characters | 8 KiB | 3 |
 | `kaseki_output_review_v2` | Soyuz | Same bounded evidence as v1 plus recorded-outcome scoring | 8 KiB | 4 |
 | `task_admission_v1` | Kaseki | Repository URL/ref, task prompt, validation commands, allowlist, task/publish modes, stage settings | 32 KiB | 6 |
+| `kaseki_goal_check_v1` | Kaseki | Bounded run evidence and 1–32 normalized success criteria | 48 KiB | Up to 64 (dynamic) |
+| `kaseki_run_evaluation_v1` | Kaseki | Bounded run evidence and an optional failure-diagnosis flag | 96 KiB | 3 or 5 (dynamic) |
+| `kaseki_context_routing_v1` | Kaseki | Tool-output metadata or up to 32 bounded scouting facts | 32 KiB | 1 or up to 32 (dynamic) |
 | `validation_recovery_v1` | Kaseki | Command, exit code, and bounded validation output | 8 KiB | 2 |
 
 The request body cap is 128 KiB. Per-profile projected-evidence caps are checked again after validation and redaction, before provider invocation.
@@ -23,6 +26,8 @@ Authenticated `GET /utcp` publishes these profile tools using the central permis
 | UTCP tool | Profile ID | Identity |
 | --- | --- | --- |
 | `assess_task_admission` | `task_admission_v1` | Kaseki |
+| `assess_goal_check` | `kaseki_goal_check_v1` | Kaseki |
+| `assess_run_evaluation` | `kaseki_run_evaluation_v1` | Kaseki |
 | `assess_validation_recovery` | `validation_recovery_v1` | Kaseki |
 | `triage_run_evidence` | `run_operations_triage_v1` | Soyuz |
 | `review_kaseki_output_v1` | `kaseki_output_review_v1` | Soyuz |
@@ -66,6 +71,18 @@ Requires `command` (up to 1,000 bytes), integer `exitCode` in 0–255, and `outp
 
 The profile answers `validation_failure_cause` and `validation_recovery_action`. A retry suggestion remains advisory; Kaseki's local retry policy remains authoritative.
 
+### `kaseki_goal_check_v1`
+
+Requires a bounded evidence object and 1–32 criteria with sequential `criterion_N` IDs. Each criterion includes its text and may include applicability, source-requirement, and verification-source context. Senku constructs one NouL question per criterion and one fixed-choice applicability question when a condition is supplied. The output schema marks answers as dynamic and restricts IDs to the criterion set; Kaseki still applies its local confidence, outcome, and retry policies.
+
+### `kaseki_run_evaluation_v1`
+
+Requires bounded evidence and `includeFailureDiagnosis`. It returns the stable assessment, reviewer-confidence, and completion-score answers, with cause and next-step answers when failure diagnosis is requested. The failure recommendation is advisory and never authorizes retry or skips validation.
+
+### `kaseki_context_routing_v1`
+
+The profile accepts one of three modes. `tool_output` assesses whether bounded tool-result metadata supports a deterministic local route. `semantic_context` assesses preserve/condense/discard for bounded metadata and an optional redacted goal summary. `phase_transfer` assesses up to 32 bounded scouting facts against a compact goal; Kaseki protects requirements and overflow facts locally. Senku receives no raw output, command text, or source code. All answers are advisory, and Kaseki applies deterministic transformation and safety policy.
+
 Redaction follows Kaseki's `redactJevEvidence()` patterns for private keys, bearer credentials, AWS access key IDs, JWT-shaped tokens, URL passwords, common provider/GitHub/chat tokens, and password/token assignments. Key names matching secret patterns are replaced recursively. These deterministic patterns are not a complete credential detector; callers must continue minimising evidence before sending it.
 
 ## Output and confidence
@@ -82,7 +99,7 @@ Optional provider usage includes only values OpenRouter supplies. Senku does not
 
 The sole permission declaration is `src/auth/permissions.ts`. The registry derives public allowed-client metadata and profile ownership from that policy. Tests check that each registered profile's ID, owner, and permissions agree.
 
-The profile's `inputSchema` is a JSON Schema definition used by runtime validation and exposed through discovery. The handwritten domain validator remains responsible for semantic checks such as URL credential rejection and parsed timestamps. Runtime-schema parity tests exercise each profile and bounded edge cases. Output schemas are derived from the server-owned question map, so answer IDs, labels, scales, and nullable confidence remain connected to the inference contract.
+The profile's `inputSchema` is a JSON Schema definition used by runtime validation and exposed through discovery. The handwritten domain validator remains responsible for semantic checks such as URL credential rejection and parsed timestamps. Runtime-schema parity tests exercise each profile and bounded edge cases. Fixed output schemas derive from the server-owned question map. Dynamic profiles validate their generated question set against the validated input and publish a bounded, profile-specific answer-ID pattern.
 
 Changing required input, question meaning, answer IDs, labels, score scale, or result shape requires a new versioned profile ID. Compatible implementation corrections may retain the version when the public contract is unchanged; document the reason in `docs/PHASE-2B-DECISIONS.md`.
 

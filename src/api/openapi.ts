@@ -43,7 +43,7 @@ function commonErrors(statuses: readonly number[]): Record<string, unknown> {
 function profileContractSchema(id: string): JsonSchema {
   return {
     type: "object",
-    required: ["schemaVersion", "id", "version", "name", "description", "owner", "questionCount", "maxEvidenceBytes", "operations", "inputSchema", "outputSchema", "limits", "evaluationEndpoint"],
+    required: ["schemaVersion", "id", "version", "name", "description", "owner", "questionCount", "dynamicQuestions", "maxEvidenceBytes", "operations", "inputSchema", "outputSchema", "limits", "evaluationEndpoint"],
     properties: {
       schemaVersion: { type: "string", const: SCHEMA_VERSION },
       id: { type: "string", const: id },
@@ -52,6 +52,7 @@ function profileContractSchema(id: string): JsonSchema {
       description: { type: "string" },
       owner: { type: "string", enum: ["kaseki", "soyuz"] },
       questionCount: { type: "integer", minimum: 1 },
+      dynamicQuestions: { type: "boolean" },
       maxEvidenceBytes: { type: "integer", minimum: 1 },
       operations: { type: "array", items: { type: "string", const: "evaluate" }, minItems: 1, maxItems: 1 },
       inputSchema: { type: "object", description: "JSON Schema 2020-12 for profile evidence." },
@@ -141,8 +142,8 @@ function buildComponents(profiles: AnyDecisionProfile[], identity: ClientIdentit
         code: ref("ErrorCode"), message: { type: "string" }, retryable: { type: "boolean" }, requestId: { type: "string", pattern: "^dec-" },
       } },
     } },
-    ProfileSummary: { type: "object", required: ["id", "version", "name", "description", "owner", "questionCount", "maxEvidenceBytes", "operations"], additionalProperties: false, properties: {
-      id: { type: "string" }, version: { type: "string" }, name: { type: "string" }, description: { type: "string" }, owner: { type: "string", enum: ["kaseki", "soyuz"] }, questionCount: { type: "integer", minimum: 1 }, maxEvidenceBytes: { type: "integer", minimum: 1 }, operations: { type: "array", items: { type: "string", const: "evaluate" }, minItems: 1, maxItems: 1 },
+    ProfileSummary: { type: "object", required: ["id", "version", "name", "description", "owner", "questionCount", "dynamicQuestions", "maxEvidenceBytes", "operations"], additionalProperties: false, properties: {
+      id: { type: "string" }, version: { type: "string" }, name: { type: "string" }, description: { type: "string" }, owner: { type: "string", enum: ["kaseki", "soyuz"] }, questionCount: { type: "integer", minimum: 1 }, dynamicQuestions: { type: "boolean" }, maxEvidenceBytes: { type: "integer", minimum: 1 }, operations: { type: "array", items: { type: "string", const: "evaluate" }, minItems: 1, maxItems: 1 },
     } },
     ProfileList: { type: "object", required: ["schemaVersion", "profiles"], additionalProperties: false, properties: {
       schemaVersion: { type: "string", const: SCHEMA_VERSION }, profiles: { type: "array", items: ref("ProfileSummary") },
