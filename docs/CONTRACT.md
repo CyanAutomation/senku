@@ -23,7 +23,7 @@ The Worker authenticates `Authorization: Bearer <token>` against two separate se
 
 | Identity | Secret | Generic decisions | Permitted profiles |
 | --- | --- | --- | --- |
-| Kaseki | `SENKU_KASEKI_API_TOKEN` | Yes | `task_admission_v1`, `validation_recovery_v1` |
+| Kaseki | `SENKU_KASEKI_API_TOKEN` | Yes | `task_admission_v1`, `kaseki_goal_check_v1`, `kaseki_run_evaluation_v1`, `kaseki_context_routing_v1`, `validation_recovery_v1` |
 | Soyuz | `SENKU_SOYUZ_API_TOKEN` | No | `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2` |
 
 Both values must be configured, valid, and different. Each is 32–1,024 printable ASCII characters without whitespace. An absent, malformed, or duplicated credential configuration fails closed for all bearer-authenticated operations; readiness is false. Token comparison uses SHA-256 digests and a fixed-length byte loop. Credentials are never logged or returned.
@@ -78,7 +78,7 @@ Successful evaluations return the same envelope shape for every profile:
 
 `usage` is omitted when the provider supplies none. `result` retains the profile's canonical answer map and duplicates `answers` for a stable envelope. Canonical choice and score answers support `confidence: null`; NouL answers always have null confidence because that result type does not carry a separate confidence value. The API never substitutes a guessed confidence.
 
-The server validates evidence, builds the fixed profile questions, makes exactly one provider attempt, validates all returned answer keys and values, and only then returns a successful assessment. Errors never contain raw evidence, question prompts, provider responses, credentials, or stack traces. Failures do not produce a successful `result`.
+The server validates evidence, builds each profile's fixed or input-derived server-owned questions, makes exactly one provider attempt, validates all returned answer keys and values against that generated set, and only then returns a successful assessment. Errors never contain raw evidence, question prompts, provider responses, credentials, or stack traces. Failures do not produce a successful `result`.
 
 ## Discovery and OpenAPI
 
@@ -95,6 +95,7 @@ The server validates evidence, builds the fixed profile questions, makes exactly
       "description": "Assess retained Kaseki run operational metadata using Soyuz's approved projection.",
       "owner": "soyuz",
       "questionCount": 3,
+      "dynamicQuestions": false,
       "maxEvidenceBytes": 12288,
       "operations": ["evaluate"]
     }
@@ -102,7 +103,7 @@ The server validates evidence, builds the fixed profile questions, makes exactly
 }
 ```
 
-The list is filtered by the central permission policy. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
+The list is filtered by the central permission policy. `questionCount` is the fixed count or dynamic maximum. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
 
 `GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. Senku does not expose the generic `/v1/decisions` endpoint in the manual. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
 
@@ -110,7 +111,7 @@ The list is filtered by the central permission policy. Profile contracts contain
 
 ## Generic decisions
 
-`POST /v1/decisions` retains the Phase 1 contract:
+`POST /v1/decisions` remains as a Kaseki-only compatibility endpoint for the opt-in generic gateway smoke check and trusted internal callers:
 
 ```json
 {

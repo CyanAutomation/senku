@@ -398,7 +398,7 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
 
         let requestBytes = 0;
         let providerAttempts = 0;
-        const questionCount = Object.keys(profile.questions).length;
+        const questionCount = profile.maxQuestionCount ?? Object.keys(profile.questions).length;
         const trackedFetch: typeof fetch = (input, init) => {
           providerAttempts += 1;
           return fetchImpl(input, init);

@@ -69,6 +69,7 @@ export interface ProfileMetadata {
   readonly allowedClients: readonly ClientIdentity[];
   readonly maxEvidenceBytes: number;
   readonly questionCount: number;
+  readonly dynamicQuestions: boolean;
 }
 
 export interface DecisionProfile<
@@ -84,14 +85,20 @@ export interface DecisionProfile<
   readonly owner: Owner;
   readonly version: string;
   readonly maxEvidenceBytes: number;
+  /** Dynamic profiles validate a per-request question set built from bounded input. */
+  readonly dynamicQuestions?: boolean;
+  /** Maximum questions emitted by a dynamic profile. */
+  readonly maxQuestionCount?: number;
+  /** Pattern used to constrain answer IDs for a dynamic profile's public output schema. */
+  readonly answerIdPattern?: string;
   readonly questions: Questions;
   readonly inputSchema: JsonSchema;
   readonly validateInput: (value: unknown) => Input;
   readonly buildDecision: (input: Input) => {
     state: string | JsonObject;
-    questions: Questions;
+    questions: Record<string, DecisionQuestion>;
   };
-  readonly validateOutput: (answers: Record<string, DecisionAnswer>) => Output;
+  readonly validateOutput: (answers: Record<string, DecisionAnswer>, input: Input) => Output;
 }
 
 export type AnyDecisionProfile = DecisionProfile<any, any, any, any, any>;
