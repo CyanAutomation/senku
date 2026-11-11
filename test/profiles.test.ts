@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { PROFILE_CLIENT_PERMISSIONS } from "../src/auth/permissions";
 import { ProfileEngineError, type ProfileQuestions } from "../src/contracts/profiles";
-import { type DecisionRequest, type Environment } from "../src/contracts/decisions";
+import { type DecisionAnswer, type DecisionRequest, type Environment } from "../src/contracts/decisions";
 import { evaluateProfile } from "../src/decisions/profile-engine";
 import { profileRegistry } from "../src/decisions/profile-registry";
 import { ProviderError } from "../src/providers/openrouter/decisions";
@@ -10,6 +10,9 @@ import { validationRecoveryProfile } from "../src/profiles/kaseki/validation-rec
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
 import { kasekiOutputReviewV1Profile } from "../src/profiles/soyuz/output-review-v1";
 import { kasekiOutputReviewV2Profile } from "../src/profiles/soyuz/output-review-v2";
+import { kasekiGoalCheckProfile } from "../src/profiles/kaseki/goal-check";
+import { kasekiRunEvaluationProfile } from "../src/profiles/kaseki/run-evaluation";
+import { kasekiContextRoutingProfile } from "../src/profiles/kaseki/context-routing";
 
 const runTriageInput = {
   run: {
@@ -49,6 +52,27 @@ const validationRecoveryInput = {
   output: "Test suite failed with an assertion mismatch.",
 };
 
+const goalCheckInput = {
+  state: { diff: "updated src/worker.ts", validation: "npm test passed" },
+  criteria: [
+    { id: "criterion_1", criterion: "The worker handles cancellation.", verificationSources: ["validation.log"] },
+    { id: "criterion_2", criterion: "The change does not expose credentials.", appliesWhen: "credentials are used" },
+  ],
+};
+
+const runEvaluationInput = {
+  state: { validation: "npm test passed", diff: "updated src/worker.ts" },
+  includeFailureDiagnosis: false,
+};
+
+const contextRoutingInput = {
+  mode: "phase_transfer",
+  evidence: {
+    phase_from: "scouting", phase_to: "coding", goal_summary: "Share the common helper.",
+    candidates: [{ id: "file_0", kind: "inspected_file", path: "src/shared.ts", text: "Reusable helper candidate." }],
+  },
+};
+
 function answerFor(question: ProfileQuestions[string]): Record<string, unknown> {
   if (question.type === "noul") return { type: "noul", noul: 0.75 };
   if (question.type === "choice") {
@@ -70,6 +94,15 @@ function answerFor(question: ProfileQuestions[string]): Record<string, unknown> 
   };
 }
 
+function validatedAnswerFor(question: ProfileQuestions[string]): DecisionAnswer {
+  const answer = answerFor(question);
+  if (question.type === "noul") {
+    const noul = answer.noul as number;
+    return { type: "noul", noul, probabilities: { false: 1 - noul, true: noul }, confidence: null };
+  }
+  return answer as unknown as DecisionAnswer;
+}
+
 function responseFor(request: DecisionRequest): Response {
   return new Response(JSON.stringify({
     model: "typesafe/jev-1.14-20261014",
@@ -78,8 +111,8 @@ function responseFor(request: DecisionRequest): Response {
   }), { headers: { "content-type": "application/json" } });
 }
 
-function rawAnswers(questions: ProfileQuestions): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(questions).map(([key, question]) => [key, answerFor(question)]));
+function rawAnswers(questions: ProfileQuestions): Record<string, DecisionAnswer> {
+  return Object.fromEntries(Object.entries(questions).map(([key, question]) => [key, validatedAnswerFor(question)]));
 }
 
 const env: Environment = {
@@ -96,13 +129,20 @@ describe("versioned decision profile registry", () => {
       "kaseki_output_review_v1",
       "kaseki_output_review_v2",
       "task_admission_v1",
+      "kaseki_goal_check_v1",
+      "kaseki_run_evaluation_v1",
+      "kaseki_context_routing_v1",
       "validation_recovery_v1",
     ]);
-    expect(profiles.map((profile) => profile.version)).toEqual(["1", "1", "2", "1", "1"]);
-    expect(profiles.map((profile) => profile.questionCount)).toEqual([3, 3, 4, 6, 2]);
+    expect(profiles.map((profile) => profile.version)).toEqual(["1", "1", "2", "1", "1", "1", "1", "1"]);
+    expect(profiles.map((profile) => profile.questionCount)).toEqual([3, 3, 4, 6, 64, 5, 32, 2]);
+    expect(profiles.map((profile) => profile.dynamicQuestions)).toEqual([false, false, false, false, true, true, true, false]);
     expect(profiles[0]).toMatchObject({ owner: "soyuz", allowedClients: ["soyuz"], maxEvidenceBytes: 12 * 1024 });
     expect(profiles[3]).toMatchObject({ owner: "kaseki", allowedClients: ["kaseki"] });
     expect(PROFILE_CLIENT_PERMISSIONS.validation_recovery_v1).toEqual(["kaseki"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_goal_check_v1).toEqual(["kaseki"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_run_evaluation_v1).toEqual(["kaseki"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_context_routing_v1).toEqual(["kaseki"]);
     for (const profile of profiles) {
       const permissions = PROFILE_CLIENT_PERMISSIONS[profile.id as keyof typeof PROFILE_CLIENT_PERMISSIONS];
       expect(profile.allowedClients).toEqual(permissions);
@@ -149,6 +189,59 @@ describe("versioned decision profile registry", () => {
     expect(Object.keys(validationRecoveryProfile.questions.validation_recovery_action.criteria)).toEqual([
       "fix_implementation", "repair_environment", "retry_validation_once", "inspect_diagnostics",
     ]);
+  });
+
+  it("builds bounded goal-check questions from validated criteria and validates their exact answers", () => {
+    const input = kasekiGoalCheckProfile.validateInput(goalCheckInput);
+    const decision = kasekiGoalCheckProfile.buildDecision(input);
+    expect(Object.keys(decision.questions)).toEqual([
+      "criterion_1", "criterion_2_applicability", "criterion_2",
+    ]);
+    expect(decision.questions.criterion_1).toMatchObject({ type: "noul" });
+    expect(decision.questions.criterion_2_applicability).toMatchObject({
+      type: "choice", criteria: { applicable: expect.any(String), not_applicable: expect.any(String), unknown: expect.any(String) },
+    });
+    expect(() => kasekiGoalCheckProfile.validateInput({ ...goalCheckInput, questions: {} })).toThrow(ProfileEngineError);
+    expect(() => kasekiGoalCheckProfile.validateInput({
+      ...goalCheckInput,
+      criteria: Array.from({ length: 33 }, (_item, index) => ({ id: `criterion_${index + 1}`, criterion: "A criterion." })),
+    })).toThrow(ProfileEngineError);
+
+    const answers = rawAnswers(decision.questions as ProfileQuestions);
+    expect(Object.keys(kasekiGoalCheckProfile.validateOutput(answers, input))).toEqual(Object.keys(decision.questions));
+    expect(() => kasekiGoalCheckProfile.validateOutput({ ...answers, unexpected: answers.criterion_1 }, input)).toThrow(ProfileEngineError);
+  });
+
+  it("builds a fixed run-evaluation contract with optional failure diagnosis", () => {
+    const regular = kasekiRunEvaluationProfile.buildDecision(kasekiRunEvaluationProfile.validateInput(runEvaluationInput));
+    const failure = kasekiRunEvaluationProfile.buildDecision(kasekiRunEvaluationProfile.validateInput({
+      ...runEvaluationInput, includeFailureDiagnosis: true,
+    }));
+    expect(Object.keys(regular.questions)).toEqual([
+      "overall_assessment", "reviewer_confidence", "task_completion_score",
+    ]);
+    expect(Object.keys(failure.questions)).toEqual([
+      "overall_assessment", "reviewer_confidence", "task_completion_score",
+      "validation_failure_cause", "validation_recovery_action",
+    ]);
+    expect(() => kasekiRunEvaluationProfile.validateInput({ ...runEvaluationInput, extra: true })).toThrow(ProfileEngineError);
+  });
+
+  it("uses one server-owned context-routing profile for all three routing modes", () => {
+    const phase = kasekiContextRoutingProfile.validateInput(contextRoutingInput);
+    expect(Object.keys(kasekiContextRoutingProfile.buildDecision(phase).questions)).toEqual(["file_0"]);
+    expect(() => kasekiContextRoutingProfile.validateOutput({ file_0: validatedAnswerFor({
+      type: "choice", instructions: "", criteria: { preserve: null, condense: null, discard: null },
+    }) }, phase)).not.toThrow();
+    expect(() => kasekiContextRoutingProfile.validateInput({
+      mode: "phase_transfer", evidence: { ...contextRoutingInput.evidence, candidates: [{ id: "unsafe_id", kind: "plan", text: "x" }] },
+    })).toThrow(ProfileEngineError);
+    expect(Object.keys(kasekiContextRoutingProfile.buildDecision(kasekiContextRoutingProfile.validateInput({
+      mode: "tool_output", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false },
+    })).questions)).toEqual(["route"]);
+    expect(Object.keys(kasekiContextRoutingProfile.buildDecision(kasekiContextRoutingProfile.validateInput({
+      mode: "semantic_context", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false, goalSummary: "bounded goal" },
+    })).questions)).toEqual(["disposition"]);
   });
 });
 
@@ -275,18 +368,19 @@ describe("profile evidence validation and projection", () => {
   });
 
   it("rejects missing, unexpected, wrong-type, and out-of-scale profile answers", () => {
-    expect(() => taskAdmissionProfile.validateOutput({})).toThrow(ProfileEngineError);
+    const admissionInput = taskAdmissionProfile.validateInput(taskAdmissionInput);
+    expect(() => taskAdmissionProfile.validateOutput({}, admissionInput)).toThrow(ProfileEngineError);
     const unexpected = rawAnswers(taskAdmissionProfile.questions);
-    unexpected.extra = { type: "noul", noul: 0.5 };
-    expect(() => taskAdmissionProfile.validateOutput(unexpected as never)).toThrow(ProfileEngineError);
+    unexpected.extra = { type: "noul", noul: 0.5, probabilities: { false: 0.5, true: 0.5 }, confidence: null };
+    expect(() => taskAdmissionProfile.validateOutput(unexpected, admissionInput)).toThrow(ProfileEngineError);
 
     const wrongChoice = rawAnswers(taskAdmissionProfile.questions);
     wrongChoice.risk_level = { type: "choice", choice: "allowed?", probabilities: {}, confidence: null };
-    expect(() => taskAdmissionProfile.validateOutput(wrongChoice as never)).toThrow(ProfileEngineError);
+    expect(() => taskAdmissionProfile.validateOutput(wrongChoice, admissionInput)).toThrow(ProfileEngineError);
 
     const outOfScale = rawAnswers(kasekiOutputReviewV2Profile.questions);
     outOfScale.recorded_outcome = { type: "score", score: 4, probabilities: {}, legend: {}, confidence: null };
-    expect(() => kasekiOutputReviewV2Profile.validateOutput(outOfScale as never)).toThrow(ProfileEngineError);
+    expect(() => kasekiOutputReviewV2Profile.validateOutput(outOfScale, kasekiOutputReviewV2Profile.validateInput(outputReviewInput))).toThrow(ProfileEngineError);
   });
 });
 

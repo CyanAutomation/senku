@@ -154,7 +154,9 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     expect(UtcpManualSchema.parse(kaseki)).toEqual(kaseki);
     expect(UtcpManualSchema.parse(soyuz)).toEqual(soyuz);
     expect(kaseki).toMatchObject({ utcp_version: "1.1", manual_version: "1.0.0" });
-    expect(kaseki.tools.map((tool) => tool.name)).toEqual(["assess_task_admission", "assess_validation_recovery"]);
+    expect(kaseki.tools.map((tool) => tool.name)).toEqual([
+      "assess_task_admission", "assess_goal_check", "assess_run_evaluation", "route_kaseki_context", "assess_validation_recovery",
+    ]);
     expect(soyuz.tools.map((tool) => tool.name)).toEqual(["triage_run_evidence", "review_kaseki_output_v1", "review_kaseki_output_v2"]);
 
     for (const tool of [...kaseki.tools, ...soyuz.tools]) {
@@ -167,6 +169,7 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
       });
       expect(tool.tool_call_template.url).toMatch(/^https?:\/\/127\.0\.0\.1:8787\/v1\/profiles\/[a-z0-9_]+\/evaluate$/);
       expect(JSON.stringify(tool.inputs)).toContain('"schemaVersion"');
+      expect(JSON.stringify(tool.outputs)).toContain('"additionalProperties"');
       expect(JSON.stringify(tool.outputs)).toContain('"confidence"');
       expect(JSON.stringify(tool)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ)_API_TOKEN|OPENROUTER_API_KEY/);
       expect(JSON.stringify(tool)).not.toContain(OPENROUTER_KEY);
@@ -196,6 +199,9 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
       const tools = await client.getTools();
       expect(tools.map((tool) => tool.name)).toEqual([
         "senku.assess_task_admission",
+        "senku.assess_goal_check",
+        "senku.assess_run_evaluation",
+        "senku.route_kaseki_context",
         "senku.assess_validation_recovery",
       ]);
       expect(provider).not.toHaveBeenCalled();

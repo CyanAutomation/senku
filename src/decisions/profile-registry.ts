@@ -5,6 +5,9 @@ import { runOperationsTriageProfile } from "../profiles/soyuz/run-operations-tri
 import { kasekiOutputReviewV1Profile } from "../profiles/soyuz/output-review-v1";
 import { kasekiOutputReviewV2Profile } from "../profiles/soyuz/output-review-v2";
 import { taskAdmissionProfile } from "../profiles/kaseki/task-admission";
+import { kasekiGoalCheckProfile } from "../profiles/kaseki/goal-check";
+import { kasekiRunEvaluationProfile } from "../profiles/kaseki/run-evaluation";
+import { kasekiContextRoutingProfile } from "../profiles/kaseki/context-routing";
 import { validationRecoveryProfile } from "../profiles/kaseki/validation-recovery";
 
 export const PROFILE_DEFINITIONS = {
@@ -12,6 +15,9 @@ export const PROFILE_DEFINITIONS = {
   kaseki_output_review_v1: kasekiOutputReviewV1Profile,
   kaseki_output_review_v2: kasekiOutputReviewV2Profile,
   task_admission_v1: taskAdmissionProfile,
+  kaseki_goal_check_v1: kasekiGoalCheckProfile,
+  kaseki_run_evaluation_v1: kasekiRunEvaluationProfile,
+  kaseki_context_routing_v1: kasekiContextRoutingProfile,
   validation_recovery_v1: validationRecoveryProfile,
 } as const satisfies Record<ProfileId, AnyDecisionProfile>;
 
@@ -30,7 +36,8 @@ function metadata(profile: AnyDecisionProfile): ProfileMetadata {
     version: profile.version,
     allowedClients: allowedClientsForProfile(profile.id as ProfileId),
     maxEvidenceBytes: profile.maxEvidenceBytes,
-    questionCount: Object.keys(profile.questions).length,
+    questionCount: profile.maxQuestionCount ?? Object.keys(profile.questions).length,
+    dynamicQuestions: profile.dynamicQuestions === true,
   };
 }
 

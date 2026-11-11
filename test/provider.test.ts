@@ -173,7 +173,11 @@ describe("OpenRouter Decisions adapter", () => {
       },
     };
     const result = await requestOpenRouterDecision(triageRequest, config, async () => jsonResponse(body));
-    expect(() => runOperationsTriageProfile.validateOutput(result.answers)).not.toThrow();
+    const triageInput = runOperationsTriageProfile.validateInput({ run: {
+      status: "failed", stage: "validation", operationalHealth: "healthy", failureClass: null,
+      createdAt: "2026-11-08T12:00:00.000Z", queuedAt: null, startedAt: null, completedAt: null, lastHeartbeatAt: null,
+    } });
+    expect(() => runOperationsTriageProfile.validateOutput(result.answers, triageInput)).not.toThrow();
     expect(result.answers.severity).toMatchObject({ type: "score", score: 1.48 });
   });
 
