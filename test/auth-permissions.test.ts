@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { authenticateBearer, isMachineTokenConfigValid } from "../src/auth/bearer";
 import {
   canEvaluateProfile,
-  canUseGenericDecisions,
   PROFILE_CLIENT_PERMISSIONS,
 } from "../src/auth/permissions";
 import { ProfileEngineError } from "../src/contracts/profiles";
@@ -37,9 +36,7 @@ describe("machine bearer configuration", () => {
 });
 
 describe("client permissions and registry", () => {
-  it("keeps generic decisions Kaseki-only and scopes each profile to its owner", () => {
-    expect(canUseGenericDecisions("kaseki")).toBe(true);
-    expect(canUseGenericDecisions("soyuz")).toBe(false);
+  it("scopes every server-owned profile to its registered owner", () => {
     for (const id of ["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"] as const) {
       expect(canEvaluateProfile(id, "soyuz")).toBe(true);
       expect(canEvaluateProfile(id, "kaseki")).toBe(false);

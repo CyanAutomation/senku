@@ -1,11 +1,10 @@
 import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
-import { canEvaluateProfile, canUseGenericDecisions, type ClientIdentity } from "./auth/permissions";
+import { canEvaluateProfile, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
 import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
 import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
-import { validateDecisionRequest } from "./contracts/validation";
-import { LIMITS, type DecisionResponse, type Environment } from "./contracts/decisions";
+import { LIMITS, type Environment } from "./contracts/decisions";
 import { ProfileEngineError } from "./contracts/profiles";
 import { evaluateProfile } from "./decisions/profile-engine";
 import { profileRegistry, type RegisteredProfileId } from "./decisions/profile-registry";
@@ -14,7 +13,6 @@ import {
   MAX_PROVIDER_TIMEOUT_MS,
   MIN_PROVIDER_TIMEOUT_MS,
   ProviderError,
-  requestOpenRouterDecision,
   resolveProviderConfig,
   type ProviderDiagnosticCode,
 } from "./providers/openrouter/decisions";
@@ -463,155 +461,8 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
         }
       }
 
-      if (url.pathname !== "/v1/decisions") {
-        const error = new ApiError("NOT_FOUND");
-        return errorResponse(error, id);
-      }
-
-      if (request.method !== "POST") {
-        const error = new ApiError("INVALID_REQUEST", false, 405);
-        const response = errorResponse(error, id);
-        response.headers.set("allow", "POST");
-        return response;
-      }
-
-      const authentication = await resolveIdentity(request, env);
-      if (!authentication.authenticated) {
-        const error = authError(authentication);
-        logFailure(logger, {
-          requestId: id,
-          error,
-          method: request.method,
-          path: url.pathname,
-          workerDurationMs: elapsedMs(started),
-        });
-        return errorResponse(error, id);
-      }
-
-      if (!canUseGenericDecisions(authentication.clientId)) {
-        const error = new ApiError("FORBIDDEN");
-        logFailure(logger, {
-          requestId: id,
-          clientId: authentication.clientId,
-          error,
-          method: request.method,
-          path: url.pathname,
-          workerDurationMs: elapsedMs(started),
-        });
-        return errorResponse(error, id);
-      }
-
-      const config = resolveProviderConfig(env);
-      if (!config.ok) {
-        const error = new ApiError("NOT_CONFIGURED");
-        logFailure(logger, {
-          requestId: id,
-          clientId: authentication.clientId,
-          error,
-          method: request.method,
-          path: url.pathname,
-          workerDurationMs: elapsedMs(started),
-        });
-        return errorResponse(error, id);
-      }
-
-      if (!hasJsonContentType(request)) {
-        const error = new ApiError("INVALID_REQUEST", false, 415);
-        logFailure(logger, {
-          requestId: id,
-          clientId: authentication.clientId,
-          error,
-          method: request.method,
-          path: url.pathname,
-          workerDurationMs: elapsedMs(started),
-        });
-        return errorResponse(error, id);
-      }
-
-      let requestBytes = 0;
-      let questionCount: number | undefined;
-      let providerAttempts = 0;
-      const trackedFetch: typeof fetch = (input, init) => {
-        providerAttempts += 1;
-        return fetchImpl(input, init);
-      };
-      try {
-        const input = await readBoundedRequest(request);
-        requestBytes = input.size;
-        const body = parseJson(input.bytes);
-        const validated = validateDecisionRequest(body);
-        if (!validated.ok) throw new ApiError(validated.code);
-        questionCount = Object.keys(validated.value.questions).length;
-
-        const providerStarted = performance.now();
-        let result: Awaited<ReturnType<typeof requestOpenRouterDecision>>;
-        try {
-          result = await requestOpenRouterDecision(validated.value, config, trackedFetch);
-        } catch (error) {
-          if (error instanceof ProviderError) {
-            const apiError = new ApiError(error.code, error.retryable);
-            const providerDurationMs = elapsedMs(providerStarted);
-            logFailure(logger, {
-              requestId: id,
-              clientId: authentication.clientId,
-              error: apiError,
-              method: request.method,
-              path: url.pathname,
-              requestBytes,
-              questionCount,
-              attemptCount: providerAttempts,
-              workerDurationMs: elapsedMs(started),
-              providerDurationMs,
-              providerDiagnosticCode: error.diagnosticCode,
-            });
-            return errorResponse(apiError, id);
-          }
-          throw error;
-        }
-
-        const durationMs = elapsedMs(providerStarted);
-        const response: DecisionResponse = {
-          schemaVersion: "1",
-          requestId: id,
-          status: "completed",
-          provider: "jev",
-          model: result.model,
-          answers: result.answers,
-          ...(result.usage ? { usage: result.usage } : {}),
-          durationMs,
-          attemptCount: 1,
-        };
-        safeLog(logger, {
-          event: "decision.completed",
-          requestId: id,
-          clientId: authentication.clientId,
-          status: "completed",
-          method: request.method,
-          path: url.pathname,
-          model: result.model,
-          questionCount,
-          requestBytes,
-          providerDurationMs: durationMs,
-          workerDurationMs: elapsedMs(started),
-          attemptCount: providerAttempts,
-          ...(result.usage ? { usage: result.usage } : {}),
-        });
-        return jsonResponse(response);
-      } catch (error) {
-        const apiError = error instanceof ApiError ? error : new ApiError("INTERNAL_ERROR");
-        logFailure(logger, {
-          requestId: id,
-          clientId: authentication.clientId,
-          error: apiError,
-          method: request.method,
-          path: url.pathname,
-          requestBytes,
-          questionCount,
-          attemptCount: providerAttempts,
-          workerDurationMs: elapsedMs(started),
-        });
-        return errorResponse(apiError, id);
-      }
+      const error = new ApiError("NOT_FOUND");
+      return errorResponse(error, id);
     },
   };
 }

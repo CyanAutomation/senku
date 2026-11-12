@@ -1,10 +1,9 @@
 import { ERROR_CODES, LIMITS, SCHEMA_VERSION } from "../contracts/decisions";
 import type { AnyDecisionProfile, JsonSchema } from "../contracts/profiles";
-import { canUseGenericDecisions, type ClientIdentity } from "../auth/permissions";
+import type { ClientIdentity } from "../auth/permissions";
 import { profileRegistry } from "../decisions/profile-registry";
 import { utcpManualResponseSchema } from "./utcp";
 import {
-  canonicalAnswerSchema,
   listPublicProfiles,
   profileAnswersSchema,
   profileEvaluationRequestSchema,
@@ -70,72 +69,6 @@ function profileContractSchema(id: string): JsonSchema {
 
 function buildComponents(profiles: AnyDecisionProfile[], identity: ClientIdentity): Record<string, unknown> {
   const schemas: Record<string, JsonSchema> = {
-    JsonValue: {
-      anyOf: [
-        { type: "null" }, { type: "boolean" }, { type: "number" }, { type: "string" },
-        { type: "array", items: ref("JsonValue") },
-        { type: "object", additionalProperties: ref("JsonValue") },
-      ],
-    },
-    JevContent: {
-      oneOf: [
-        { type: "string", minLength: 1, maxLength: LIMITS.instructionBytes, pattern: "\\S", "x-maxBytes": LIMITS.instructionBytes },
-        { type: "array", minItems: 1, items: ref("JsonValue") },
-        { type: "object", minProperties: 1, additionalProperties: ref("JsonValue") },
-      ],
-      "x-maxDepth": LIMITS.contentDepth,
-      "x-maxNodes": LIMITS.contentNodes,
-    },
-    DecisionQuestion: {
-      oneOf: [ref("NoulQuestion"), ref("ChoiceQuestion"), ref("ScoreQuestion")],
-    },
-    NoulQuestion: {
-      type: "object", required: ["type", "instructions"], additionalProperties: false,
-      properties: {
-        type: { type: "string", const: "noul" }, instructions: ref("JevContent"),
-        criteria: { type: "object", minProperties: 1, maxProperties: 2, properties: {
-          true: ref("JevContent"), false: ref("JevContent"),
-        }, additionalProperties: false },
-      },
-    },
-    ChoiceQuestion: {
-      type: "object", required: ["type", "instructions", "criteria"], additionalProperties: false,
-      properties: {
-        type: { type: "string", const: "choice" }, instructions: ref("JevContent"),
-        criteria: { type: "object", minProperties: 2, maxProperties: LIMITS.optionsPerQuestion, propertyNames: { pattern: "^[a-z][a-z0-9_]{0,63}$" }, additionalProperties: { anyOf: [ref("JevContent"), { type: "null" }] } },
-      },
-    },
-    ScoreQuestion: {
-      type: "object", required: ["type", "instructions", "criteria"], additionalProperties: false,
-      properties: {
-        type: { type: "string", const: "score" }, instructions: ref("JevContent"),
-        criteria: { type: "array", minItems: 2, maxItems: LIMITS.optionsPerQuestion, items: ref("JevContent") },
-      },
-    },
-    DecisionRequest: {
-      type: "object", required: ["schemaVersion", "state", "questions"], additionalProperties: false,
-      "x-maxRequestBytes": LIMITS.requestBytes,
-      "x-maxContentDepth": LIMITS.contentDepth,
-      "x-maxContentNodes": LIMITS.contentNodes,
-      properties: {
-        schemaVersion: { type: "string", const: SCHEMA_VERSION },
-        state: { oneOf: [{ type: "string", minLength: 1, pattern: "\\S" }, { type: "object", additionalProperties: ref("JsonValue") }], "x-maxBytes": LIMITS.requestBytes },
-        questions: { type: "object", minProperties: 1, maxProperties: LIMITS.questions, propertyNames: { pattern: "^[a-z][a-z0-9_]{0,63}$" }, additionalProperties: ref("DecisionQuestion") },
-      },
-    },
-    DecisionAnswer: { $ref: "#/components/schemas/CanonicalDecisionAnswer" },
-    CanonicalDecisionAnswer: canonicalAnswerSchema(),
-    DecisionAnswerMap: { type: "object", additionalProperties: ref("DecisionAnswer") },
-    ProviderUsage: { type: "object", additionalProperties: false, properties: {
-      input_tokens: { type: "integer", minimum: 0 }, output_tokens: { type: "integer", minimum: 0 }, total_tokens: { type: "integer", minimum: 0 }, cost: { type: "number", minimum: 0 },
-    } },
-    DecisionResponse: {
-      type: "object", required: ["schemaVersion", "requestId", "status", "provider", "model", "answers", "durationMs", "attemptCount"], additionalProperties: false,
-      properties: {
-        schemaVersion: { type: "string", const: SCHEMA_VERSION }, requestId: { type: "string", pattern: "^dec-" }, status: { type: "string", const: "completed" },
-        provider: { type: "string", const: "jev" }, model: { type: "string", minLength: 1, maxLength: 200 }, answers: ref("DecisionAnswerMap"), usage: ref("ProviderUsage"), durationMs: { type: "integer", minimum: 0 }, attemptCount: { type: "integer", const: 1 },
-      },
-    },
     ErrorCode: { type: "string", enum: ERROR_CODES },
     ErrorResponse: { type: "object", required: ["error"], additionalProperties: false, properties: {
       error: { type: "object", required: ["code", "message", "retryable", "requestId"], additionalProperties: false, properties: {
@@ -242,16 +175,6 @@ function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown
       } },
     },
   };
-
-  if (canUseGenericDecisions(identity)) {
-    paths["/v1/decisions"] = {
-      post: {
-        operationId: "createGenericDecision", summary: "Evaluate trusted dynamic questions (Kaseki only)", security: [{ BearerAuth: [] }],
-        requestBody: { required: true, content: { "application/json": { schema: ref("DecisionRequest") } } },
-        responses: { "200": response(ref("DecisionResponse"), "Completed decision response."), ...commonErrors([400, 401, 403, 405, 413, 415, 500, 502, 503, 504]) },
-      },
-    };
-  }
 
   const profileSchemas = Object.fromEntries(profiles.map((profile) => [profile.id, {
     input: schemas[inputName(profile.id)],

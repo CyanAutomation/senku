@@ -141,16 +141,18 @@ describe("authenticated profile REST routes", () => {
     expect(JSON.stringify(await forbidden.json())).not.toContain("task_admission_v1");
   });
 
-  it("keeps generic decisions Kaseki-only and ignores caller-supplied identity", async () => {
+  it("retires the generic decision route and ignores caller-supplied identity", async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => providerResponse(JSON.parse(String(init?.body)) as DecisionRequest));
     const worker = createWorker({ fetchImpl, logger: () => undefined });
     const genericBody = { schemaVersion: "1", state: { facts: ["bounded"] }, questions: {
       q: { type: "noul", instructions: "Is this likely?" },
     } };
-    const soyuzGeneric = await worker.fetch(request("/v1/decisions", {
-      method: "POST", token: SOYUZ_TOKEN, body: genericBody, contentType: "application/json",
-    }), env);
-    expect(soyuzGeneric.status).toBe(403);
+    for (const token of [KASEKI_TOKEN, SOYUZ_TOKEN]) {
+      const generic = await worker.fetch(request("/v1/decisions", {
+        method: "POST", token, body: genericBody, contentType: "application/json",
+      }), env);
+      expect(generic.status).toBe(404);
+    }
 
     const forgedIdentity = await worker.fetch(request("/v1/profiles/run_operations_triage_v1/evaluate", {
       method: "POST", token: KASEKI_TOKEN, clientIdentityHeader: "soyuz",
