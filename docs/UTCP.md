@@ -30,7 +30,7 @@ Senku projects profile contracts into the JSON Schema vocabulary carried by UTCP
 | `review_kaseki_output_v1` | `kaseki_output_review_v1` | Soyuz | `POST /v1/profiles/kaseki_output_review_v1/evaluate` |
 | `review_kaseki_output_v2` | `kaseki_output_review_v2` | Soyuz | `POST /v1/profiles/kaseki_output_review_v2/evaluate` |
 
-Kaseki receives exactly the first five tools; Soyuz receives exactly the last three. The generic `POST /v1/decisions` endpoint is deliberately excluded because it accepts trusted dynamic questions. There is no query parameter to select an identity. The central permission matrix applies again when each REST route is invoked.
+Kaseki receives exactly the first five tools; Soyuz receives exactly the last three. All tools map to fixed, server-owned profile routes; Senku does not accept caller-defined question sets. There is no query parameter to select an identity. The central permission matrix applies again when each REST route is invoked.
 
 Tool descriptions explain their bounded evidence, advisory result, limitations, and the fact that probabilities do not grant operational permission. These tools do not admit runs, execute commands, approve retries, change run state, publish branches, or merge pull requests. The consumer retains deterministic authority.
 

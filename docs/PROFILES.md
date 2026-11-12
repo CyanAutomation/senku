@@ -103,6 +103,6 @@ The profile's `inputSchema` is a JSON Schema definition used by runtime validati
 
 Changing required input, question meaning, answer IDs, labels, score scale, or result shape requires a new versioned profile ID. Compatible implementation corrections may retain the version when the public contract is unchanged; document the reason in `docs/PHASE-2B-DECISIONS.md`.
 
-## Generic endpoint and deferred work
+## Public surface and deferred work
 
-`POST /v1/decisions` remains a separate Kaseki-only bounded interface for trusted dynamic questions. Soyuz profile access does not grant generic access, and this endpoint is not exposed as a UTCP tool. Senku UTCP describes decision evaluations; Soyuz UTCP belongs in the Soyuz repository and describes run-management operations. Senku does not add persistence, retries, or fallback models. Phase 2D deployment status is tracked separately.
+Senku accepts only the versioned, server-owned profiles listed above. It does not expose an endpoint for caller-defined questions. Senku UTCP describes decision evaluations; Soyuz UTCP belongs in the Soyuz repository and describes run-management operations. Senku does not add persistence, retries, or fallback models. Phase 2D deployment status is tracked separately.
