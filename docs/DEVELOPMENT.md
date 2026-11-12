@@ -94,7 +94,7 @@ curl http://127.0.0.1:8787/utcp \
   -H 'Authorization: Bearer <SENKU_KASEKI_API_TOKEN>'
 ```
 
-The Soyuz credential cannot call the generic `/v1/decisions` route or inspect Kaseki profile contracts. Kaseki cannot inspect or invoke Soyuz profiles.
+Each credential can inspect and invoke only its registered profiles. Neither identity can call a generic caller-defined decision route.
 
 ## Spending control
 

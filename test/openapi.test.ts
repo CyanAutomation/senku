@@ -51,8 +51,10 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
       expect(profileEvaluation.responses).toHaveProperty("405");
       expect(profileEvaluation.responses).toHaveProperty("415");
       expect((paths["/healthz"] as { get: { responses: Record<string, unknown> } }).get.responses).toHaveProperty("405");
-      if (identity === "kaseki") expect(paths).toHaveProperty("/v1/decisions");
-      else expect(paths).not.toHaveProperty("/v1/decisions");
+      expect(paths).not.toHaveProperty("/v1/decisions");
+      const schemas = (document.components as { schemas: Record<string, unknown> }).schemas;
+      expect(schemas).not.toHaveProperty("DecisionRequest");
+      expect(schemas).not.toHaveProperty("DecisionResponse");
       const components = document.components as { schemas: Record<string, unknown>; securitySchemes: Record<string, unknown> };
       expect(components.securitySchemes).toHaveProperty("BearerAuth");
       expect((paths["/v1/profiles"] as { get: { security: Array<Record<string, unknown>> } }).get.security).toEqual([{ BearerAuth: [] }]);
@@ -148,9 +150,9 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
     expect(() => recovery.validateInput(blankCommand)).toThrow();
   });
 
-  it("documents nullable canonical confidence instead of inventing a numeric value", () => {
-    const document = buildOpenApiDocument("soyuz");
-    const canonical = ((document.components as { schemas: Record<string, unknown> }).schemas.CanonicalDecisionAnswer) as {
+  it("documents nullable canonical confidence in dynamic profile answers", () => {
+    const profile = getPublicProfileContract("kaseki_run_evaluation_v1");
+    const canonical = (profile.outputSchema as { additionalProperties?: unknown }).additionalProperties as {
       oneOf: Array<{ properties: { confidence: { type: string | string[] } } }>;
     };
     expect(canonical.oneOf.map((answer) => answer.properties.confidence.type)).toEqual([

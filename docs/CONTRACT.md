@@ -6,7 +6,6 @@ Senku exposes a versioned REST API. All JSON responses use `Cache-Control: no-st
 
 | Method | Path | Authentication and behavior |
 | --- | --- | --- |
-| `POST` | `/v1/decisions` | Kaseki only. Accepts bounded dynamic JEV questions for trusted Kaseki workloads. |
 | `POST` | `/v1/profiles/{profileId}/evaluate` | Bearer authenticated. Checks profile permission before reading evidence or calling JEV. |
 | `GET` | `/v1/profiles` | Bearer authenticated. Lists only profiles the identity may invoke. |
 | `GET` | `/v1/profiles/{profileId}` | Bearer authenticated. Returns the permitted profile's input and output JSON Schemas and limits. A known but forbidden profile returns 403 without its details. |
@@ -105,28 +104,13 @@ The server validates evidence, builds each profile's fixed or input-derived serv
 
 The list is filtered by the central permission policy. `questionCount` is the fixed count or dynamic maximum. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
 
-`GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. Senku does not expose the generic `/v1/decisions` endpoint in the manual. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
+`GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
 
-`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes, including `/utcp`. The authenticated document includes only the profile contracts and UTCP tools available to that identity. Kaseki's document includes `POST /v1/decisions`; Soyuz's does not advertise an operation it cannot use. Structural, route, reference, permission, schema/runtime parity, and independent Redocly OpenAPI validation run offline.
+`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes, including `/utcp`. The authenticated document includes only the profile contracts and UTCP tools available to that identity. Neither identity receives a generic caller-defined question endpoint. Structural, route, reference, permission, schema/runtime parity, and independent Redocly OpenAPI validation run offline.
 
-## Generic decisions
+## Retired generic decisions endpoint
 
-`POST /v1/decisions` remains as a Kaseki-only compatibility endpoint for the opt-in generic gateway smoke check and trusted internal callers:
-
-```json
-{
-  "schemaVersion": "1",
-  "state": { "status": "failed", "exitCode": 1 },
-  "questions": {
-    "likely_transient": {
-      "type": "noul",
-      "instructions": "Does the evidence suggest a transient failure?"
-    }
-  }
-}
-```
-
-Question types are `noul`, `choice`, and `score`. The generic endpoint remains Kaseki-only even though Soyuz has its own profile token. It is intended for trusted internal workloads and is not an open public classifier.
+The former `POST /v1/decisions` route accepted caller-defined questions. It has been removed; requests to that path return `404` for both identities. Kaseki and Soyuz callers must use their permitted versioned profiles so Senku owns question wording, answer IDs, and output validation.
 
 ## Bounds and errors
 
