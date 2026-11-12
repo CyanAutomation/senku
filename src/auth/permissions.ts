@@ -11,11 +11,6 @@ export type ProfileId =
   | "kaseki_context_routing_v1"
   | "validation_recovery_v1";
 
-export const CLIENT_PERMISSIONS = {
-  kaseki: { genericDecisions: true },
-  soyuz: { genericDecisions: false },
-} as const satisfies Record<ClientIdentity, { genericDecisions: boolean }>;
-
 export const PROFILE_CLIENT_PERMISSIONS = {
   run_operations_triage_v1: ["soyuz"],
   kaseki_output_review_v1: ["soyuz"],
@@ -26,10 +21,6 @@ export const PROFILE_CLIENT_PERMISSIONS = {
   kaseki_context_routing_v1: ["kaseki"],
   validation_recovery_v1: ["kaseki"],
 } as const satisfies Record<ProfileId, readonly ClientIdentity[]>;
-
-export function canUseGenericDecisions(clientId: ClientIdentity): boolean {
-  return CLIENT_PERMISSIONS[clientId].genericDecisions;
-}
 
 export function allowedClientsForProfile(profileId: ProfileId): readonly ClientIdentity[] {
   return PROFILE_CLIENT_PERMISSIONS[profileId];

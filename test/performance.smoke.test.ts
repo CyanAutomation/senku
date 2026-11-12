@@ -104,7 +104,7 @@ describe("bounded request performance smoke", () => {
           } else if (endpoint === "/openapi.json") {
             const paths = document.paths as Record<string, unknown>;
             expect(paths).toHaveProperty("/v1/profiles/{profileId}/evaluate");
-            expect(Object.hasOwn(paths, "/v1/decisions")).toBe(scenario.identity === "kaseki");
+            expect(Object.hasOwn(paths, "/v1/decisions")).toBe(false);
           } else {
             expect(document.id).toBe(endpoint.split("/").at(-1));
           }
@@ -127,73 +127,6 @@ describe("bounded request performance smoke", () => {
       results,
     }));
     expect(results).toHaveLength(11);
-  });
-
-  it("accepts small, typical, and maximum-sized requests with matching answer envelopes", async () => {
-    const makeBody = (questionCount: number, state: string | Record<string, unknown>) => JSON.stringify({
-      schemaVersion: "1",
-      state,
-      questions: questions(questionCount),
-    });
-    const baseUpperBound = {
-      schemaVersion: "1",
-      state: "",
-      questions: questions(LIMITS.questions),
-    };
-    const baseSize = new TextEncoder().encode(JSON.stringify(baseUpperBound)).byteLength;
-    const upperBody = JSON.stringify({
-      ...baseUpperBound,
-      state: "x".repeat(LIMITS.requestBytes - baseSize),
-    });
-    const scenarios = [
-      { name: "small", body: makeBody(1, { status: "failed", exitCode: 1 }), questionCount: 1 },
-      { name: "typical", body: makeBody(8, { status: "failed", failureSummary: "Temporary timeout", evidence: "x".repeat(3_000) }), questionCount: 8 },
-      { name: "upper-bound", body: upperBody, questionCount: LIMITS.questions },
-    ];
-    const worker = createWorker({
-      fetchImpl: async (_input, init) => mockedProviderResponse(JSON.parse(String(init?.body)) as DecisionRequest),
-      logger: () => undefined,
-    });
-    const results: Array<{ name: string; requestBytes: number; averageWallMs: number; maxWallMs: number }> = [];
-
-    for (const scenario of scenarios) {
-      const requestBytes = new TextEncoder().encode(scenario.body).byteLength;
-      expect(requestBytes).toBeLessThanOrEqual(LIMITS.requestBytes);
-      if (scenario.name === "upper-bound") expect(requestBytes).toBe(LIMITS.requestBytes);
-      const elapsed: number[] = [];
-      for (let run = 0; run < 3; run += 1) {
-        const started = performance.now();
-        const response = await worker.fetch(new Request("https://senku.test/v1/decisions", {
-          method: "POST",
-          headers: {
-            authorization: "Bearer performance-client-token-0123456789abcdef",
-            "content-type": "application/json",
-          },
-          body: scenario.body,
-        }), environment);
-        expect(response.status).toBe(200);
-        const responseBody = await response.json() as {
-          status: string;
-          attemptCount: number;
-          answers: Record<string, unknown>;
-        };
-        expect(responseBody).toMatchObject({ status: "completed", attemptCount: 1 });
-        expect(Object.keys(responseBody.answers)).toHaveLength(scenario.questionCount);
-        elapsed.push(performance.now() - started);
-      }
-      results.push({
-        name: scenario.name,
-        requestBytes,
-        averageWallMs: Number((elapsed.reduce((sum, value) => sum + value, 0) / elapsed.length).toFixed(2)),
-        maxWallMs: Number(Math.max(...elapsed).toFixed(2)),
-      });
-    }
-
-    console.log(JSON.stringify({
-      benchmark: "local workerd wall-clock smoke; not billed CPU time",
-      results,
-    }));
-    expect(results).toHaveLength(3);
   });
 
   it("measures complete HTTP profile evaluations through mocked JEV at representative maximum inputs", async () => {
