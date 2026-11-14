@@ -106,14 +106,16 @@ Senku remains stateless with no D1, KV, R2, Queue, or Durable Object. It uses on
 
 ## CI and deployment
 
-The `CI` workflow runs typecheck, tests with mocked provider responses, OpenAPI validation, and Wrangler's dry-run build for pull requests. It does not make live provider calls. The `CodeQL` workflow analyzes JavaScript/TypeScript on pull requests, pushes to `main`, and weekly. Require both `verify` and `CodeQL / Analyze (javascript-typescript)` before merging into `main`. Workflow actions are pinned to commit SHAs; Dependabot checks for updates weekly.
+The `CI` workflow runs typecheck, tests with mocked provider responses, OpenAPI validation, and Wrangler's dry-run build for pull requests and pushes to `main`. It does not make live provider calls. Pull requests also run dependency review, which blocks newly introduced high or critical vulnerabilities in runtime and development dependencies. The `workflow-security` job runs actionlint and `zizmor`; zizmor adds workflow security annotations. The `CodeQL` workflow analyzes JavaScript/TypeScript on pull requests, pushes to `main`, and weekly. Require `CI / verify`, `CI / dependency-review`, `CI / workflow-security`, and `CodeQL / Analyze (javascript-typescript)` before merging into `main`. Workflow actions are pinned to commit SHAs; Dependabot checks npm and GitHub Actions dependencies weekly.
 
-The `Deploy Worker` workflow runs after a pull request is merged into `main` and runs `npm ci` followed by `npm run deploy`, using the repository's `cloudflare` GitHub Actions environment. It checks out `main` and relies on the required pre-merge CI check instead of rerunning the test suite. The environment has no branch or tag restriction; the workflow trigger and merge condition limit deployments to merged pull requests targeting `main`. The environment has these entries:
+After a push to `main`, the `Deploy Worker` job runs only if the `verify` job succeeds. It deploys the exact commit that passed validation, then retries a public `/healthz` check. The job uses the repository's `cloudflare` GitHub Actions environment and has these entries:
 
 | GitHub Environment entry | Value |
 | --- | --- |
 | Variable `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID that owns the `senku` Worker |
 | Secret `CLOUDFLARE_API_TOKEN` | Account-scoped Cloudflare API token with Workers Editor permission |
+
+In GitHub's environment settings, restrict `cloudflare` deployments to the `main` branch as defense in depth. The workflow itself only starts deployment for a successful push to `main`.
 
 These credentials authorize Wrangler to deploy. They do not configure the Worker’s runtime secrets. Set `OPENROUTER_API_KEY`, `SENKU_KASEKI_API_TOKEN`, and `SENKU_SOYUZ_API_TOKEN` directly on the Cloudflare Worker as described above. Until all three are configured, `/readyz` remains `not_ready` even though a deployment can succeed. Keep the provider spending limit and post-deployment verification steps in [PHASE-2D-DEPLOYMENT.md](PHASE-2D-DEPLOYMENT.md) as production gates.
 
