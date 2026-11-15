@@ -6,6 +6,7 @@ import { getPublicProfileContract, listPublicProfiles } from "./api/profile-cont
 import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { LIMITS, type Environment } from "./contracts/decisions";
 import { ProfileEngineError } from "./contracts/profiles";
+import { isPlainRecord } from "./contracts/records";
 import { evaluateProfile } from "./decisions/profile-engine";
 import { profileRegistry, type RegisteredProfileId } from "./decisions/profile-registry";
 import {
@@ -170,12 +171,6 @@ function internalRouteFailure(
   return errorResponse(error, details.requestId);
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
 function profileIdFromPath(value: string): string | null {
   try {
     const decoded = decodeURIComponent(value);
@@ -210,7 +205,7 @@ function profileProviderDiagnosticCode(error: unknown): ProviderDiagnosticCode |
 }
 
 function profileInputFromEnvelope(value: unknown): unknown {
-  if (!isRecord(value)) throw new ApiError("INVALID_REQUEST");
+  if (!isPlainRecord(value)) throw new ApiError("INVALID_REQUEST");
   if (typeof value.schemaVersion === "string" && value.schemaVersion !== "1") {
     throw new ApiError("UNSUPPORTED_SCHEMA_VERSION");
   }
@@ -225,244 +220,274 @@ function authError(authentication: Exclude<AuthenticationResult, { authenticated
   return new ApiError(authentication.reason === "not_configured" ? "NOT_CONFIGURED" : "UNAUTHENTICATED");
 }
 
+type ProtectedRoute =
+  | { kind: "profile-list"; expectedMethod: "GET"; logPath: "/v1/profiles" }
+  | { kind: "profile-detail"; expectedMethod: "GET"; logPath: "/v1/profiles/{profileId}"; profileId: string }
+  | { kind: "profile-evaluation"; expectedMethod: "POST"; logPath: "/v1/profiles/{profileId}/evaluate"; profileId: string }
+  | { kind: "openapi"; expectedMethod: "GET"; logPath: "/openapi.json" }
+  | { kind: "utcp"; expectedMethod: "GET"; logPath: "/utcp" };
+
+interface WorkerRuntime {
+  fetchImpl: typeof fetch;
+  logger: Logger;
+  serializeManual: typeof serializeUtcpManual;
+  resolveIdentity: (request: Request, env: Environment) => Promise<AuthenticationResult>;
+}
+
+interface RequestContext extends WorkerRuntime {
+  request: Request;
+  env: Environment;
+  id: string;
+  started: number;
+}
+
+function methodNotAllowed(id: string, expectedMethod: string): Response {
+  const response = errorResponse(new ApiError("INVALID_REQUEST", false, 405), id);
+  response.headers.set("allow", expectedMethod);
+  return response;
+}
+
+function healthRouteResponse(path: string, request: Request, env: Environment, id: string): Response | null {
+  if (path !== "/healthz" && path !== "/readyz") return null;
+  if (request.method !== "GET") return methodNotAllowed(id, "GET");
+  if (path === "/healthz") return jsonResponse({ status: "ok" });
+  const isReady = ready(env);
+  return jsonResponse({ status: isReady ? "ready" : "not_ready" }, isReady ? 200 : 503);
+}
+
+function matchProtectedRoute(path: string): ProtectedRoute | null {
+  if (path === "/v1/profiles") return { kind: "profile-list", expectedMethod: "GET", logPath: "/v1/profiles" };
+  if (path === "/openapi.json") return { kind: "openapi", expectedMethod: "GET", logPath: "/openapi.json" };
+  if (path === "/utcp") return { kind: "utcp", expectedMethod: "GET", logPath: "/utcp" };
+
+  const evaluationMatch = /^\/v1\/profiles\/([^/]+)\/evaluate$/.exec(path);
+  if (evaluationMatch) {
+    return {
+      kind: "profile-evaluation",
+      expectedMethod: "POST",
+      logPath: "/v1/profiles/{profileId}/evaluate",
+      profileId: evaluationMatch[1],
+    };
+  }
+  const detailMatch = /^\/v1\/profiles\/([^/]+)$/.exec(path);
+  if (detailMatch) {
+    return {
+      kind: "profile-detail",
+      expectedMethod: "GET",
+      logPath: "/v1/profiles/{profileId}",
+      profileId: detailMatch[1],
+    };
+  }
+  return null;
+}
+
+function logProfileRequestFailure(
+  context: RequestContext,
+  clientId: ClientIdentity,
+  error: ApiError,
+  path: string,
+): Response {
+  logFailure(context.logger, {
+    requestId: context.id,
+    clientId,
+    error,
+    method: context.request.method,
+    path,
+    workerDurationMs: elapsedMs(context.started),
+    event: "profile.request_failed",
+  });
+  return errorResponse(error, context.id);
+}
+
+function profileEvaluationFailure(
+  context: RequestContext,
+  clientId: ClientIdentity,
+  error: ApiError,
+  details: { profileId: string; path: string; requestBytes?: number; questionCount?: number; attemptCount?: number; cause?: unknown },
+): Response {
+  logFailure(context.logger, {
+    requestId: context.id,
+    clientId,
+    error,
+    method: context.request.method,
+    path: details.path,
+    requestBytes: details.requestBytes,
+    questionCount: details.questionCount,
+    attemptCount: details.attemptCount,
+    profileId: details.profileId,
+    workerDurationMs: elapsedMs(context.started),
+    event: "profile.evaluation_failed",
+    providerDiagnosticCode: profileProviderDiagnosticCode(details.cause),
+  });
+  return errorResponse(error, context.id);
+}
+
+async function evaluateProfileRequest(
+  context: RequestContext,
+  clientId: ClientIdentity,
+  route: Extract<ProtectedRoute, { kind: "profile-evaluation" }>,
+  profileId: string,
+  profile: ReturnType<typeof profileRegistry.getProfile>,
+): Promise<Response> {
+  if (!hasJsonContentType(context.request)) {
+    return profileEvaluationFailure(context, clientId, new ApiError("INVALID_REQUEST", false, 415), {
+      profileId, path: route.logPath,
+    });
+  }
+
+  let requestBytes = 0;
+  let providerAttempts = 0;
+  const questionCount = profile.maxQuestionCount ?? Object.keys(profile.questions).length;
+  const trackedFetch: typeof fetch = (input, init) => {
+    providerAttempts += 1;
+    return context.fetchImpl(input, init);
+  };
+  try {
+    const input = await readBoundedRequest(context.request);
+    requestBytes = input.size;
+    const profileInput = profileInputFromEnvelope(parseJson(input.bytes));
+    const result = await evaluateProfile(route.profileId as RegisteredProfileId, profileInput, {
+      clientIdentity: clientId,
+    }, { env: context.env, fetchImpl: trackedFetch });
+    const response = {
+      schemaVersion: "1",
+      requestId: context.id,
+      status: "completed",
+      profileId: result.profileId,
+      profileVersion: result.profileVersion,
+      provider: "jev",
+      model: result.model,
+      answers: result.answers,
+      result: result.result,
+      ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
+      durationMs: result.metadata.providerDurationMs,
+      attemptCount: result.metadata.attemptCount,
+    };
+    safeLog(context.logger, {
+      event: "profile.evaluation_completed",
+      requestId: context.id,
+      clientId,
+      profileId: result.profileId,
+      profileVersion: result.profileVersion,
+      status: "completed",
+      method: context.request.method,
+      path: route.logPath,
+      model: result.model,
+      questionCount: result.metadata.questionCount,
+      evidenceBytes: result.metadata.evidenceBytes,
+      requestBytes,
+      providerDurationMs: result.metadata.providerDurationMs,
+      workerDurationMs: elapsedMs(context.started),
+      attemptCount: result.metadata.attemptCount,
+      ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
+    });
+    return jsonResponse(response);
+  } catch (error) {
+    return profileEvaluationFailure(context, clientId, profileApiError(error), {
+      profileId,
+      path: route.logPath,
+      requestBytes,
+      questionCount,
+      attemptCount: providerAttempts,
+      cause: error,
+    });
+  }
+}
+
+async function handleProfileResource(
+  context: RequestContext,
+  clientId: ClientIdentity,
+  route: Extract<ProtectedRoute, { kind: "profile-detail" | "profile-evaluation" }>,
+): Promise<Response> {
+  const profileId = profileIdFromPath(route.profileId);
+  if (!profileId) return logProfileRequestFailure(context, clientId, new ApiError("INVALID_REQUEST"), route.logPath);
+  if (!canEvaluateProfile(profileId, clientId)) {
+    return logProfileRequestFailure(context, clientId, new ApiError("FORBIDDEN"), route.logPath);
+  }
+
+  let profile: ReturnType<typeof profileRegistry.getProfile>;
+  try {
+    profile = profileRegistry.getProfile(profileId);
+  } catch (error) {
+    return logProfileRequestFailure(context, clientId, profileApiError(error), route.logPath);
+  }
+
+  if (route.kind === "profile-detail") return jsonResponse(getPublicProfileContract(profileId));
+  return evaluateProfileRequest(context, clientId, route, profileId, profile);
+}
+
+async function handleProtectedRoute(context: RequestContext, route: ProtectedRoute): Promise<Response> {
+  if (context.request.method !== route.expectedMethod) return methodNotAllowed(context.id, route.expectedMethod);
+  const authentication = await context.resolveIdentity(context.request, context.env);
+  if (!authentication.authenticated) {
+    const error = authError(authentication);
+    logFailure(context.logger, {
+      requestId: context.id,
+      error,
+      method: context.request.method,
+      path: route.logPath,
+      workerDurationMs: elapsedMs(context.started),
+      event: "profile.request_failed",
+    });
+    return errorResponse(error, context.id);
+  }
+
+  if (route.kind === "profile-list") {
+    return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
+  }
+  if (route.kind === "openapi") {
+    try {
+      return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
+    } catch {
+      return internalRouteFailure(context.logger, {
+        requestId: context.id,
+        clientId: authentication.clientId,
+        request: context.request,
+        path: route.logPath,
+        started: context.started,
+      });
+    }
+  }
+  if (route.kind === "utcp") {
+    try {
+      const manual = context.serializeManual(authentication.clientId, context.env.SENKU_PUBLIC_BASE_URL);
+      return manual ? serializedJsonResponse(manual) : errorResponse(new ApiError("NOT_CONFIGURED"), context.id);
+    } catch {
+      return internalRouteFailure(context.logger, {
+        requestId: context.id,
+        clientId: authentication.clientId,
+        request: context.request,
+        path: route.logPath,
+        started: context.started,
+      });
+    }
+  }
+  return handleProfileResource(context, authentication.clientId, route);
+}
+
 export function createWorker(dependencies: WorkerDependencies = {}): {
   fetch(request: Request, env: Environment): Promise<Response>;
 } {
-  const fetchImpl = dependencies.fetchImpl ?? fetch;
-  const logger = dependencies.logger ?? consoleLogger;
-  const serializeManual = dependencies.serializeUtcpManual ?? serializeUtcpManual;
-  const resolveIdentity = dependencies.resolveIdentity
-    ?? ((request: Request, env: Environment) => authenticateBearer(request.headers.get("authorization"), env));
+  const runtime: WorkerRuntime = {
+    fetchImpl: dependencies.fetchImpl ?? fetch,
+    logger: dependencies.logger ?? consoleLogger,
+    serializeManual: dependencies.serializeUtcpManual ?? serializeUtcpManual,
+    resolveIdentity: dependencies.resolveIdentity
+      ?? ((request, env) => authenticateBearer(request.headers.get("authorization"), env)),
+  };
 
   return {
     async fetch(request: Request, env: Environment): Promise<Response> {
       const started = performance.now();
       const id = requestId();
-      const url = new URL(request.url);
+      const context: RequestContext = { ...runtime, request, env, id, started };
+      const path = new URL(request.url).pathname;
+      const healthResponse = healthRouteResponse(path, request, env, id);
+      if (healthResponse) return healthResponse;
 
-      if (url.pathname === "/healthz") {
-        if (request.method !== "GET") {
-          const error = new ApiError("INVALID_REQUEST", false, 405);
-          const response = errorResponse(error, id);
-          response.headers.set("allow", "GET");
-          return response;
-        }
-        return jsonResponse({ status: "ok" });
-      }
-
-      if (url.pathname === "/readyz") {
-        if (request.method !== "GET") {
-          const error = new ApiError("INVALID_REQUEST", false, 405);
-          const response = errorResponse(error, id);
-          response.headers.set("allow", "GET");
-          return response;
-        }
-        const isReady = ready(env);
-        return jsonResponse({ status: isReady ? "ready" : "not_ready" }, isReady ? 200 : 503);
-      }
-
-      const profileEvaluationMatch = /^\/v1\/profiles\/([^/]+)\/evaluate$/.exec(url.pathname);
-      const profileDetailMatch = /^\/v1\/profiles\/([^/]+)$/.exec(url.pathname);
-      const isProfileList = url.pathname === "/v1/profiles";
-      const isOpenApi = url.pathname === "/openapi.json";
-      const isUtcp = url.pathname === "/utcp";
-      if (isProfileList || profileDetailMatch || profileEvaluationMatch || isOpenApi || isUtcp) {
-        const expectedMethod = profileEvaluationMatch ? "POST" : "GET";
-        const logPath = isProfileList
-          ? "/v1/profiles"
-          : isOpenApi
-            ? "/openapi.json"
-            : isUtcp
-              ? "/utcp"
-            : profileEvaluationMatch
-              ? "/v1/profiles/{profileId}/evaluate"
-              : "/v1/profiles/{profileId}";
-        if (request.method !== expectedMethod) {
-          const error = new ApiError("INVALID_REQUEST", false, 405);
-          const response = errorResponse(error, id);
-          response.headers.set("allow", expectedMethod);
-          return response;
-        }
-
-        const authentication = await resolveIdentity(request, env);
-        if (!authentication.authenticated) {
-          const error = authError(authentication);
-          logFailure(logger, {
-            requestId: id,
-            error,
-            method: request.method,
-            path: logPath,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.request_failed",
-          });
-          return errorResponse(error, id);
-        }
-
-        if (isProfileList) {
-          return jsonResponse({ schemaVersion: "1", profiles: listPublicProfiles(authentication.clientId) });
-        }
-        if (isOpenApi) {
-          try {
-            return serializedJsonResponse(serializeOpenApiDocument(authentication.clientId));
-          } catch {
-            return internalRouteFailure(logger, {
-              requestId: id,
-              clientId: authentication.clientId,
-              request,
-              path: logPath,
-              started,
-            });
-          }
-        }
-        if (isUtcp) {
-          try {
-            const manual = serializeManual(authentication.clientId, env.SENKU_PUBLIC_BASE_URL);
-            return manual
-              ? serializedJsonResponse(manual)
-              : errorResponse(new ApiError("NOT_CONFIGURED"), id);
-          } catch {
-            return internalRouteFailure(logger, {
-              requestId: id,
-              clientId: authentication.clientId,
-              request,
-              path: logPath,
-              started,
-            });
-          }
-        }
-
-        const profileId = profileIdFromPath((profileDetailMatch ?? profileEvaluationMatch)![1]);
-        if (!profileId) {
-          const error = new ApiError("INVALID_REQUEST");
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error,
-            method: request.method,
-            path: logPath,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.request_failed",
-          });
-          return errorResponse(error, id);
-        }
-
-        if (!canEvaluateProfile(profileId, authentication.clientId)) {
-          const error = new ApiError("FORBIDDEN");
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error,
-            method: request.method,
-            path: logPath,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.request_failed",
-          });
-          return errorResponse(error, id);
-        }
-
-        let profile;
-        try {
-          profile = profileRegistry.getProfile(profileId);
-        } catch (error) {
-          const apiError = profileApiError(error);
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error: apiError,
-            method: request.method,
-            path: logPath,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.request_failed",
-          });
-          return errorResponse(apiError, id);
-        }
-
-        if (profileDetailMatch) return jsonResponse(getPublicProfileContract(profileId));
-
-        if (!hasJsonContentType(request)) {
-          const error = new ApiError("INVALID_REQUEST", false, 415);
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error,
-            method: request.method,
-            path: logPath,
-            profileId,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.evaluation_failed",
-          });
-          return errorResponse(error, id);
-        }
-
-        let requestBytes = 0;
-        let providerAttempts = 0;
-        const questionCount = profile.maxQuestionCount ?? Object.keys(profile.questions).length;
-        const trackedFetch: typeof fetch = (input, init) => {
-          providerAttempts += 1;
-          return fetchImpl(input, init);
-        };
-        try {
-          const input = await readBoundedRequest(request);
-          requestBytes = input.size;
-          const profileInput = profileInputFromEnvelope(parseJson(input.bytes));
-          const result = await evaluateProfile(profileId as RegisteredProfileId, profileInput, {
-            clientIdentity: authentication.clientId,
-          }, { env, fetchImpl: trackedFetch });
-          const response = {
-            schemaVersion: "1",
-            requestId: id,
-            status: "completed",
-            profileId: result.profileId,
-            profileVersion: result.profileVersion,
-            provider: "jev",
-            model: result.model,
-            answers: result.answers,
-            result: result.result,
-            ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
-            durationMs: result.metadata.providerDurationMs,
-            attemptCount: result.metadata.attemptCount,
-          };
-          safeLog(logger, {
-            event: "profile.evaluation_completed",
-            requestId: id,
-            clientId: authentication.clientId,
-            profileId: result.profileId,
-            profileVersion: result.profileVersion,
-            status: "completed",
-            method: request.method,
-            path: logPath,
-            model: result.model,
-            questionCount: result.metadata.questionCount,
-            evidenceBytes: result.metadata.evidenceBytes,
-            requestBytes,
-            providerDurationMs: result.metadata.providerDurationMs,
-            workerDurationMs: elapsedMs(started),
-            attemptCount: result.metadata.attemptCount,
-            ...(result.metadata.usage ? { usage: result.metadata.usage } : {}),
-          });
-          return jsonResponse(response);
-        } catch (error) {
-          const apiError = profileApiError(error);
-          logFailure(logger, {
-            requestId: id,
-            clientId: authentication.clientId,
-            error: apiError,
-            method: request.method,
-            path: logPath,
-            requestBytes,
-            questionCount,
-            attemptCount: providerAttempts,
-            profileId,
-            workerDurationMs: elapsedMs(started),
-            event: "profile.evaluation_failed",
-            providerDiagnosticCode: profileProviderDiagnosticCode(error),
-          });
-          return errorResponse(apiError, id);
-        }
-      }
-
-      const error = new ApiError("NOT_FOUND");
-      return errorResponse(error, id);
+      const route = matchProtectedRoute(path);
+      if (route) return handleProtectedRoute(context, route);
+      return errorResponse(new ApiError("NOT_FOUND"), id);
     },
   };
 }
