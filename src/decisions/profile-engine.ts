@@ -49,7 +49,7 @@ function prepareProfileRequest(profile: AnyDecisionProfile, input: unknown): Pre
     state: decision.state,
     questions: decision.questions,
   };
-  if (utf8Size(JSON.stringify(request)) > LIMITS.requestBytes) {
+  if (serializedSize(request) > LIMITS.requestBytes) {
     throw new ProfileEngineError("PROFILE_INPUT_TOO_LARGE");
   }
 
