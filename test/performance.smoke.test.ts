@@ -1,25 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
-import { LIMITS, type DecisionRequest, type Environment } from "../src/contracts/decisions";
+import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import type { ProfileId } from "../src/auth/permissions";
 import { profileRegistry } from "../src/decisions/profile-registry";
+import { makeTestEnvironment } from "./helpers/environment";
 
-const environment: Environment = {
-  OPENROUTER_API_KEY: "performance-test-key",
-  SENKU_KASEKI_API_TOKEN: "performance-client-token-0123456789abcdef",
-  SENKU_SOYUZ_API_TOKEN: "performance-soyuz-token-0123456789abcdef",
-  SENKU_PUBLIC_BASE_URL: "https://senku.scheimann.workers.dev",
-  JEV_MODEL: "~typesafe/jev-latest",
-  SENKU_PROVIDER_TIMEOUT_MS: "15000",
-};
-
-// Operational purpose: docs/DEVELOPMENT.md, Commands. Timings are diagnostic, not pass/fail budgets.
-function questions(count: number) {
-  return Object.fromEntries(Array.from({ length: count }, (_unused, index) => [
-    "question_" + index,
-    { type: "noul", instructions: "Does the bounded evidence support this statement?" },
-  ]));
-}
+const environment = makeTestEnvironment("performance");
 
 function mockedProviderResponse(request: DecisionRequest): Response {
   const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
@@ -49,19 +35,18 @@ function mockedProviderResponse(request: DecisionRequest): Response {
   }), { headers: { "content-type": "application/json" } });
 }
 
-describe("bounded request performance smoke", () => {
   it("measures permission-scoped discovery and OpenAPI serialization without provider calls", async () => {
     const provider = vi.fn(async () => new Response("{}", { status: 500 }));
     const worker = createWorker({ fetchImpl: provider, logger: () => undefined });
     const scenarios = [
       {
         identity: "kaseki" as const,
-        token: "performance-client-token-0123456789abcdef",
+        token: environment.SENKU_KASEKI_API_TOKEN!,
         profiles: ["task_admission_v1", "validation_recovery_v1"],
       },
       {
         identity: "soyuz" as const,
-        token: "performance-soyuz-token-0123456789abcdef",
+        token: environment.SENKU_SOYUZ_API_TOKEN!,
         profiles: ["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"],
       },
     ];
@@ -143,19 +128,19 @@ describe("bounded request performance smoke", () => {
       goalSetting: { enabled: true, model: "g".repeat(255), timeoutSeconds: 10_800 },
     };
     const scenarios = [
-      { id: "run_operations_triage_v1", token: "performance-soyuz-token-0123456789abcdef", input: { run: {
+      { id: "run_operations_triage_v1", token: environment.SENKU_SOYUZ_API_TOKEN!, input: { run: {
         status: "failed", stage: "s".repeat(128), operationalHealth: "suspect_stalled", failureClass: "f".repeat(128),
         createdAt: "2026-11-08T12:00:00.000Z", queuedAt: "2026-11-08T12:00:01.000Z", startedAt: "2026-11-08T12:00:02.000Z",
         completedAt: "2026-11-08T12:00:03.000Z", lastHeartbeatAt: "2026-11-08T12:00:02.500Z",
       } } },
-      { id: "kaseki_output_review_v1", token: "performance-soyuz-token-0123456789abcdef", input: { canonicalRun: {
+      { id: "kaseki_output_review_v1", token: environment.SENKU_SOYUZ_API_TOKEN!, input: { canonicalRun: {
         status: "failed", failureClass: "f".repeat(128), exitCode: -1, changedFileCount: 1_000_000,
       }, summary: "s".repeat(2_000) } },
-      { id: "kaseki_output_review_v2", token: "performance-soyuz-token-0123456789abcdef", input: { canonicalRun: {
+      { id: "kaseki_output_review_v2", token: environment.SENKU_SOYUZ_API_TOKEN!, input: { canonicalRun: {
         status: "failed", failureClass: "f".repeat(128), exitCode: 143, changedFileCount: 1_000_000,
       }, summary: "s".repeat(2_000) } },
-      { id: "task_admission_v1", token: "performance-client-token-0123456789abcdef", input: maxTaskAdmissionInput },
-      { id: "validation_recovery_v1", token: "performance-client-token-0123456789abcdef", input: {
+      { id: "task_admission_v1", token: environment.SENKU_KASEKI_API_TOKEN!, input: maxTaskAdmissionInput },
+      { id: "validation_recovery_v1", token: environment.SENKU_KASEKI_API_TOKEN!, input: {
         command: "npm test", exitCode: 1, output: "x".repeat(6_000),
       } },
     ];
@@ -239,4 +224,3 @@ describe("bounded request performance smoke", () => {
     expect(results).toHaveLength(5);
     expect(results.map((item) => item.profileId).sort()).toEqual(scenarios.map((item) => item.id).sort());
   });
-});

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { buildOpenApiDocument } from "../src/api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "../src/api/profile-contracts";
 import { PROFILE_CLIENT_PERMISSIONS, type ProfileId } from "../src/auth/permissions";
@@ -31,7 +31,6 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
   return output;
 }
 
-describe("permission-filtered OpenAPI and profile schemas", () => {
   it("returns a structurally complete OpenAPI 3.1 document for each identity", () => {
     for (const identity of ["kaseki", "soyuz"] as const) {
       const document = buildOpenApiDocument(identity) as Record<string, unknown>;
@@ -163,4 +162,3 @@ describe("permission-filtered OpenAPI and profile schemas", () => {
     };
     expect(distribution.probabilities).toMatchObject({ "x-probabilitySum": 1, "x-probabilityTolerance": 0.03 });
   });
-});

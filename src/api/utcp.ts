@@ -1,4 +1,4 @@
-import { LIMITS, SCHEMA_VERSION } from "../contracts/decisions";
+import { LIMITS } from "../contracts/decisions";
 import type { JsonSchema } from "../contracts/profiles";
 import { canEvaluateProfile, type ClientIdentity, type ProfileId } from "../auth/permissions";
 import { profileRegistry } from "../decisions/profile-registry";
@@ -9,10 +9,10 @@ import {
   profileEvaluationResponseSchema,
 } from "./profile-contracts";
 
-export const UTCP_VERSION = "1.1";
-export const UTCP_MANUAL_VERSION = "1.0.0";
-export const UTCP_MANUAL_NAME = "senku";
-export const UTCP_API_TOKEN_VARIABLE = "SENKU_API_TOKEN";
+const UTCP_VERSION = "1.1";
+const UTCP_MANUAL_VERSION = "1.0.0";
+const UTCP_MANUAL_NAME = "senku";
+const UTCP_API_TOKEN_VARIABLE = "SENKU_API_TOKEN";
 const UTCP_API_TOKEN_PLACEHOLDER = "${" + UTCP_API_TOKEN_VARIABLE + "}";
 
 interface UtcpAuth {
@@ -345,14 +345,3 @@ export function serializeUtcpManual(identity: ClientIdentity, configuredBaseUrl:
   manualCache.set(identity, { origin, json });
   return json;
 }
-
-export function utcpManualToolNames(identity: ClientIdentity): string[] {
-  return listPublicProfiles(identity).map(({ id }) => {
-    const definition = toolDefinitionByProfile.get(id as ProfileId);
-    if (!definition || !canEvaluateProfile(id, identity)) throw new Error("UTCP profile policy is inconsistent.");
-    return definition.name;
-  });
-}
-
-export const UTCP_REQUEST_BYTES = LIMITS.requestBytes;
-export const UTCP_SCHEMA_VERSION = SCHEMA_VERSION;

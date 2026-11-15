@@ -10,7 +10,7 @@ import { kasekiRunEvaluationProfile } from "../profiles/kaseki/run-evaluation";
 import { kasekiContextRoutingProfile } from "../profiles/kaseki/context-routing";
 import { validationRecoveryProfile } from "../profiles/kaseki/validation-recovery";
 
-export const PROFILE_DEFINITIONS = {
+const PROFILE_DEFINITIONS = {
   run_operations_triage_v1: runOperationsTriageProfile,
   kaseki_output_review_v1: kasekiOutputReviewV1Profile,
   kaseki_output_review_v2: kasekiOutputReviewV2Profile,
@@ -22,8 +22,6 @@ export const PROFILE_DEFINITIONS = {
 } as const satisfies Record<ProfileId, AnyDecisionProfile>;
 
 export type RegisteredProfileId = keyof typeof PROFILE_DEFINITIONS;
-export type ProfileInputFor<Id extends RegisteredProfileId> =
-  ReturnType<(typeof PROFILE_DEFINITIONS)[Id]["validateInput"]>;
 export type ProfileOutputFor<Id extends RegisteredProfileId> =
   ReturnType<(typeof PROFILE_DEFINITIONS)[Id]["validateOutput"]>;
 

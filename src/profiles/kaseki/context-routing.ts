@@ -13,6 +13,10 @@ const ROUTES = {
   discard: "Omit only clearly irrelevant or redundant evidence that is safe to leave out of active context.",
 } as const;
 const PHASE_CANDIDATE_ID = /^(?:file|observation|plan|test)_[0-9]+$/;
+const TOOL_OUTPUT_NUMBER_FIELDS = ["characters", "bytes", "approximateTokens", "lineCount"] as const;
+const OPTIONAL_BOOLEAN_FIELDS = ["overSoftToolOutputTarget", "changedState", "containsFailureSignal"] as const;
+const OPTIONAL_INTEGER_FIELDS = ["toolOutputTargetTokens", "exitStatus"] as const;
+const OPTIONAL_STRING_FIELDS = ["operation", "filePath", "goalSummary"] as const;
 
 export type ContextRoutingMode = "tool_output" | "semantic_context" | "phase_transfer";
 export interface KasekiContextRoutingInput {
@@ -28,37 +32,47 @@ const inputSchema: JsonSchema = {
   },
 };
 
+function requireFiniteNonNegative(value: unknown): void {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
+}
+
+function validateToolOutputMeasurements(value: Record<string, unknown>): void {
+  for (const key of TOOL_OUTPUT_NUMBER_FIELDS) requireFiniteNonNegative(value[key]);
+  const ratio = value.consecutiveDuplicateLineRatio;
+  if (typeof ratio !== "number" || !Number.isFinite(ratio) || ratio < 0 || ratio > 1
+    || typeof value.hasReadRange !== "boolean") {
+    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
+}
+
+function validateOptionalToolOutputFields(value: Record<string, unknown>): void {
+  for (const key of OPTIONAL_BOOLEAN_FIELDS) {
+    if (value[key] !== undefined && typeof value[key] !== "boolean") throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
+  for (const key of OPTIONAL_INTEGER_FIELDS) {
+    if (value[key] !== undefined && (!Number.isInteger(value[key]) || (value[key] as number) < 0)) {
+      throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+    }
+  }
+  for (const key of OPTIONAL_STRING_FIELDS) {
+    if (value[key] !== undefined) requireString(value[key], key === "goalSummary" ? 1_200 : 256, { allowEmpty: key === "goalSummary" });
+  }
+}
+
 function validateToolOutputEvidence(value: Record<string, unknown>, semantic: boolean): Record<string, unknown> {
   const allowed = [
-    "phase", "toolName", "resultKind", "isError", "characters", "bytes", "approximateTokens", "lineCount",
-    "consecutiveDuplicateLineRatio", "hasReadRange", "toolOutputTargetTokens", "overSoftToolOutputTarget",
-    "operation", "changedState", "containsFailureSignal", "exitStatus", "filePath", ...(semantic ? ["goalSummary"] : []),
-  ];
+    "phase", "toolName", "resultKind", "isError", ...TOOL_OUTPUT_NUMBER_FIELDS, "consecutiveDuplicateLineRatio",
+    "hasReadRange", ...OPTIONAL_INTEGER_FIELDS, ...OPTIONAL_BOOLEAN_FIELDS, ...OPTIONAL_STRING_FIELDS,
+  ].filter((key) => semantic || key !== "goalSummary");
   requireOnlyKeys(value, allowed, ["phase", "toolName", "resultKind", "isError"]);
   requireString(value.phase, 120);
   requireString(value.toolName, 120);
   requireEnum(value.resultKind, ["source_code", "search_output", "command_output", "file_content", "other"] as const);
   if (typeof value.isError !== "boolean") throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-  if (typeof value.characters !== "number" || !Number.isFinite(value.characters) || value.characters < 0
-    || typeof value.bytes !== "number" || !Number.isFinite(value.bytes) || value.bytes < 0
-    || typeof value.approximateTokens !== "number" || !Number.isFinite(value.approximateTokens) || value.approximateTokens < 0
-    || typeof value.lineCount !== "number" || !Number.isFinite(value.lineCount) || value.lineCount < 0
-    || typeof value.consecutiveDuplicateLineRatio !== "number" || !Number.isFinite(value.consecutiveDuplicateLineRatio)
-    || value.consecutiveDuplicateLineRatio < 0 || value.consecutiveDuplicateLineRatio > 1
-    || typeof value.hasReadRange !== "boolean") {
-    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-  }
-  for (const key of ["overSoftToolOutputTarget", "changedState", "containsFailureSignal"]) {
-    if (value[key] !== undefined && typeof value[key] !== "boolean") throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-  }
-  for (const key of ["toolOutputTargetTokens", "exitStatus"]) {
-    if (value[key] !== undefined && (!Number.isInteger(value[key]) || (value[key] as number) < 0)) {
-      throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-    }
-  }
-  for (const key of ["operation", "filePath", "goalSummary"]) {
-    if (value[key] !== undefined) requireString(value[key], key === "goalSummary" ? 1_200 : 256, { allowEmpty: key === "goalSummary" });
-  }
+  validateToolOutputMeasurements(value);
+  validateOptionalToolOutputFields(value);
   return value;
 }
 
