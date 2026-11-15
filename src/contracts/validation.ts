@@ -4,9 +4,9 @@ import {
   type DecisionQuestion,
   type DecisionRequest,
   type JevContent,
-  type JsonObject,
   type JsonValue,
 } from "./decisions";
+import { isPlainRecord } from "./records";
 
 export type RequestValidation =
   | { ok: true; value: DecisionRequest }
@@ -20,14 +20,19 @@ function hasOnlyKeys(value: Record<string, unknown>, keys: readonly string[]): b
   return Object.keys(value).every((key) => keys.includes(key));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-}
-
 interface NodeBudget {
   count: number;
+}
+
+function isJsonPrimitive(value: unknown): boolean {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function jsonChildren(value: unknown): unknown[] | null {
+  if (Array.isArray(value)) return value;
+  if (isPlainRecord(value)) return Object.values(value);
+  return null;
 }
 
 function isJsonTree(value: unknown, budget: NodeBudget): value is JsonValue {
@@ -37,17 +42,10 @@ function isJsonTree(value: unknown, budget: NodeBudget): value is JsonValue {
     budget.count += 1;
     if (budget.count > LIMITS.contentNodes || current.depth > LIMITS.contentDepth) return false;
     const item = current.value;
-    if (item === null || typeof item === "string" || typeof item === "boolean") continue;
-    if (typeof item === "number") {
-      if (!Number.isFinite(item)) return false;
-      continue;
-    }
-    if (Array.isArray(item)) {
-      for (const child of item) stack.push({ value: child, depth: current.depth + 1 });
-      continue;
-    }
-    if (!isRecord(item)) return false;
-    for (const child of Object.values(item)) stack.push({ value: child, depth: current.depth + 1 });
+    if (isJsonPrimitive(item)) continue;
+    const children = jsonChildren(item);
+    if (children === null) return false;
+    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
   }
   return true;
 }
@@ -56,54 +54,55 @@ function isJevContent(value: unknown, budget: NodeBudget): value is JevContent {
   if (typeof value === "string") {
     return value.trim().length > 0 && new TextEncoder().encode(value).byteLength <= LIMITS.instructionBytes;
   }
-  if (!Array.isArray(value) && !isRecord(value)) return false;
+  if (!Array.isArray(value) && !isPlainRecord(value)) return false;
   if (Array.isArray(value) ? value.length === 0 : Object.keys(value).length === 0) return false;
   return isJsonTree(value, budget);
 }
 
+function isNoulQuestionCriteria(value: unknown, budget: NodeBudget): boolean {
+  if (value === undefined) return true;
+  if (!isPlainRecord(value) || !hasOnlyKeys(value, ["true", "false"])) return false;
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => isJevContent(value[key], budget));
+}
+
+function isChoiceQuestionCriteria(value: unknown, budget: NodeBudget): boolean {
+  if (!isPlainRecord(value)) return false;
+  const keys = Object.keys(value);
+  return keys.length >= 2
+    && keys.length <= LIMITS.optionsPerQuestion
+    && identifierKeys(value)
+    && keys.every((key) => value[key] === null || isJevContent(value[key], budget));
+}
+
+function isScoreQuestionCriteria(value: unknown, budget: NodeBudget): boolean {
+  return Array.isArray(value)
+    && value.length >= 2
+    && value.length <= LIMITS.optionsPerQuestion
+    && value.every((item) => isJevContent(item, budget));
+}
+
 function isQuestion(value: unknown, budget: NodeBudget): value is DecisionQuestion {
-  if (!isRecord(value) || typeof value.type !== "string" || !hasOnlyKeys(value, ["type", "instructions", "criteria"])) {
-    return false;
-  }
-  if (!isJevContent(value.instructions, budget)) return false;
+  if (!isPlainRecord(value) || typeof value.type !== "string"
+    || !hasOnlyKeys(value, ["type", "instructions", "criteria"])
+    || !isJevContent(value.instructions, budget)) return false;
 
-  if (value.type === "noul") {
-    const criteria = value.criteria;
-    if (criteria === undefined) return true;
-    if (!isRecord(criteria) || !hasOnlyKeys(criteria, ["true", "false"])) return false;
-    const keys = Object.keys(criteria);
-    return keys.length > 0
-      && keys.every((key) => isJevContent(criteria[key], budget));
+  switch (value.type) {
+    case "noul": return isNoulQuestionCriteria(value.criteria, budget);
+    case "choice": return isChoiceQuestionCriteria(value.criteria, budget);
+    case "score": return isScoreQuestionCriteria(value.criteria, budget);
+    default: return false;
   }
-
-  if (value.type === "choice") {
-    const criteria = value.criteria;
-    if (!isRecord(criteria)) return false;
-    const keys = Object.keys(criteria);
-    return keys.length >= 2
-      && keys.length <= LIMITS.optionsPerQuestion
-      && identifierKeys(criteria)
-      && keys.every((key) => criteria[key] === null || isJevContent(criteria[key], budget));
-  }
-
-  if (value.type === "score") {
-    if (!Array.isArray(value.criteria) || value.criteria.length < 2 || value.criteria.length > LIMITS.optionsPerQuestion) {
-      return false;
-    }
-    return value.criteria.every((item) => isJevContent(item, budget));
-  }
-
-  return false;
 }
 
 export function validateDecisionRequest(value: unknown): RequestValidation {
-  if (!isRecord(value)) return { ok: false, code: "INVALID_REQUEST" };
+  if (!isPlainRecord(value)) return { ok: false, code: "INVALID_REQUEST" };
   if (typeof value.schemaVersion === "string" && value.schemaVersion !== SCHEMA_VERSION) {
     return { ok: false, code: "UNSUPPORTED_SCHEMA_VERSION" };
   }
   if (!hasOnlyKeys(value, ["schemaVersion", "state", "questions"])
     || value.schemaVersion !== SCHEMA_VERSION
-    || (typeof value.state !== "string" && !isRecord(value.state))) {
+    || (typeof value.state !== "string" && !isPlainRecord(value.state))) {
     return { ok: false, code: "INVALID_REQUEST" };
   }
 
@@ -117,7 +116,7 @@ export function validateDecisionRequest(value: unknown): RequestValidation {
   }
 
   const questions = value.questions;
-  if (!isRecord(questions)) return { ok: false, code: "INVALID_REQUEST" };
+  if (!isPlainRecord(questions)) return { ok: false, code: "INVALID_REQUEST" };
   const questionIds = Object.keys(questions);
   if (questionIds.length < 1 || questionIds.length > LIMITS.questions
     || !identifierKeys(questions)
@@ -126,12 +125,4 @@ export function validateDecisionRequest(value: unknown): RequestValidation {
   }
 
   return { ok: true, value: value as unknown as DecisionRequest };
-}
-
-export function isRequestObject(value: unknown): value is Record<string, unknown> {
-  return isRecord(value);
-}
-
-export function isJsonObject(value: unknown): value is JsonObject {
-  return isRecord(value);
 }

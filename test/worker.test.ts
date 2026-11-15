@@ -1,15 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
-import type { Environment } from "../src/contracts/decisions";
+import { makeTestEnvironment } from "./helpers/environment";
 
-const env: Environment = {
-  OPENROUTER_API_KEY: "test-openrouter-key",
-  SENKU_KASEKI_API_TOKEN: "test-client-token-0123456789abcdef",
-  SENKU_SOYUZ_API_TOKEN: "test-soyuz-token-0123456789abcdef",
-  SENKU_PUBLIC_BASE_URL: "https://senku.scheimann.workers.dev",
-  JEV_MODEL: "~typesafe/jev-latest",
-  SENKU_PROVIDER_TIMEOUT_MS: "15000",
-};
+const env = makeTestEnvironment("worker");
 
 describe("Worker routes", () => {
   it("does not expose caller-defined decisions over HTTP", async () => {
@@ -18,7 +11,7 @@ describe("Worker routes", () => {
       new Request("https://senku.test/v1/decisions", {
         method: "POST",
         headers: {
-          authorization: "Bearer test-client-token-0123456789abcdef",
+          authorization: `Bearer ${env.SENKU_KASEKI_API_TOKEN}`,
           "content-type": "application/json",
         },
         body: JSON.stringify({
@@ -51,5 +44,14 @@ describe("Worker routes", () => {
     expect(notReady.status).toBe(503);
     expect(await notReady.json()).toEqual({ status: "not_ready" });
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("advertises GET for unsupported health and readiness methods", async () => {
+    const worker = createWorker({ logger: () => undefined });
+    for (const path of ["/healthz", "/readyz"]) {
+      const response = await worker.fetch(new Request(`https://senku.test${path}`, { method: "POST" }), env);
+      expect(response.status).toBe(405);
+      expect(response.headers.get("allow")).toBe("GET");
+    }
   });
 });

@@ -121,7 +121,6 @@ const env: Environment = {
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
 
-describe("versioned decision profile registry", () => {
   it("registers exactly the initial Soyuz and Kaseki profiles with owner-scoped metadata", () => {
     const profiles = profileRegistry.listProfiles();
     expect(profiles.map((profile) => profile.id)).toEqual([
@@ -243,9 +242,7 @@ describe("versioned decision profile registry", () => {
       mode: "semantic_context", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false, goalSummary: "bounded goal" },
     })).questions)).toEqual(["disposition"]);
   });
-});
 
-describe("profile evidence validation and projection", () => {
   it("builds the same bounded Soyuz operational projection without accepting extra fields", () => {
     const input = runOperationsTriageProfile.validateInput(runTriageInput);
     const decision = runOperationsTriageProfile.buildDecision(input);
@@ -382,7 +379,6 @@ describe("profile evidence validation and projection", () => {
     outOfScale.recorded_outcome = { type: "score", score: 4, probabilities: {}, legend: {}, confidence: null };
     expect(() => kasekiOutputReviewV2Profile.validateOutput(outOfScale, kasekiOutputReviewV2Profile.validateInput(outputReviewInput))).toThrow(ProfileEngineError);
   });
-});
 
 describe("shared profile engine", () => {
   it("checks permissions before provider invocation and returns typed answers with safe usage metadata", async () => {

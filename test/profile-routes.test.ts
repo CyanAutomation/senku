@@ -1,17 +1,11 @@
-import { describe, expect, it, vi } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
-import type { DecisionRequest, Environment } from "../src/contracts/decisions";
+import type { DecisionRequest } from "../src/contracts/decisions";
+import { makeTestEnvironment } from "./helpers/environment";
 
-const KASEKI_TOKEN = "profile-route-kaseki-token-0123456789abcdef";
-const SOYUZ_TOKEN = "profile-route-soyuz-token-0123456789abcdef";
-const env: Environment = {
-  OPENROUTER_API_KEY: "test-openrouter-key",
-  SENKU_KASEKI_API_TOKEN: KASEKI_TOKEN,
-  SENKU_SOYUZ_API_TOKEN: SOYUZ_TOKEN,
-  SENKU_PUBLIC_BASE_URL: "https://senku.scheimann.workers.dev",
-  JEV_MODEL: "~typesafe/jev-latest",
-  SENKU_PROVIDER_TIMEOUT_MS: "15000",
-};
+const env = makeTestEnvironment("profile-route");
+const KASEKI_TOKEN = env.SENKU_KASEKI_API_TOKEN!;
+const SOYUZ_TOKEN = env.SENKU_SOYUZ_API_TOKEN!;
 
 function providerResponse(request: DecisionRequest, options: { usage?: boolean; invalid?: boolean } = {}): Response {
   const answers = options.invalid ? {} : Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
@@ -74,7 +68,6 @@ const scenarios = [
   { id: "validation_recovery_v1", token: KASEKI_TOKEN, input: { command: "npm test", exitCode: 1, output: "Assertion failed." } },
 ] as const;
 
-describe("authenticated profile REST routes", () => {
   it("evaluates each registered profile through the HTTP envelope with one provider attempt", async () => {
     for (const scenario of scenarios) {
       const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
@@ -279,4 +272,3 @@ describe("authenticated profile REST routes", () => {
     });
     expect(missing.status).toBe(503);
   });
-});

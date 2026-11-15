@@ -1,6 +1,6 @@
 import { HttpCallTemplateSerializer } from "@utcp/http";
 import { UtcpClient, UtcpClientConfigSerializer, UtcpManualSchema } from "@utcp/sdk";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { buildOpenApiDocument } from "../src/api/openapi";
 import { buildUtcpManual, projectJsonSchemaForUtcp, serializeUtcpManual, trustedSenkuOrigin } from "../src/api/utcp";
 import type { DecisionRequest, Environment } from "../src/contracts/decisions";
@@ -147,7 +147,6 @@ const runTriageRequest = {
   },
 };
 
-describe("authenticated UTCP discovery and HTTP invocation", () => {
   it("generates an SDK-valid, permission-filtered UTCP 1.1 manual", () => {
     const kaseki = buildUtcpManual("kaseki", LOCAL_BASE_URL)!;
     const soyuz = buildUtcpManual("soyuz", LOCAL_BASE_URL)!;
@@ -434,4 +433,3 @@ describe("authenticated UTCP discovery and HTTP invocation", () => {
     const openapi = buildOpenApiDocument("kaseki") as { paths: Record<string, unknown> };
     expect(openapi.paths).toHaveProperty("/utcp");
   });
-});

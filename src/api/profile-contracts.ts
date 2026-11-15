@@ -79,24 +79,7 @@ export function getPublicProfileContract(profileId: string): PublicProfileContra
 
 function questionAnswerSchema(question: DecisionQuestion): JsonSchema {
   if (question.type === "noul") {
-    return {
-      type: "object",
-      required: ["type", "noul", "probabilities", "confidence"],
-      additionalProperties: false,
-      properties: {
-        type: { type: "string", const: "noul" },
-        noul: { type: "number", minimum: 0, maximum: 1 },
-        probabilities: {
-          type: "object",
-          required: ["false", "true"],
-          additionalProperties: false,
-          "x-probabilitySum": 1,
-          "x-probabilityTolerance": LIMITS.probabilityTolerance,
-          properties: { false: { type: "number", minimum: 0, maximum: 1 }, true: { type: "number", minimum: 0, maximum: 1 } },
-        },
-        confidence: { type: "null", const: null },
-      },
-    };
+    return noulAnswerSchema();
   }
 
   if (question.type === "choice") {
@@ -149,6 +132,27 @@ function questionAnswerSchema(question: DecisionQuestion): JsonSchema {
         properties: Object.fromEntries(scale.map((key) => [key, { type: "number", minimum: 0, maximum: 1 }])),
       },
       confidence: { type: ["number", "null"], minimum: 0, maximum: 1 },
+    },
+  };
+}
+
+function noulAnswerSchema(): JsonSchema {
+  return {
+    type: "object",
+    required: ["type", "noul", "probabilities", "confidence"],
+    additionalProperties: false,
+    properties: {
+      type: { type: "string", const: "noul" },
+      noul: { type: "number", minimum: 0, maximum: 1 },
+      probabilities: {
+        type: "object",
+        required: ["false", "true"],
+        additionalProperties: false,
+        "x-probabilitySum": 1,
+        "x-probabilityTolerance": LIMITS.probabilityTolerance,
+        properties: { false: { type: "number", minimum: 0, maximum: 1 }, true: { type: "number", minimum: 0, maximum: 1 } },
+      },
+      confidence: { type: "null", const: null },
     },
   };
 }
@@ -224,24 +228,10 @@ export function profileEvaluationResponseSchema(
   };
 }
 
-export function canonicalAnswerSchema(): JsonSchema {
+function canonicalAnswerSchema(): JsonSchema {
   return {
     oneOf: [
-      {
-        type: "object",
-        required: ["type", "noul", "probabilities", "confidence"],
-        additionalProperties: false,
-        properties: {
-          type: { type: "string", const: "noul" },
-          noul: { type: "number", minimum: 0, maximum: 1 },
-          probabilities: {
-            type: "object", required: ["false", "true"], additionalProperties: false,
-            "x-probabilitySum": 1, "x-probabilityTolerance": LIMITS.probabilityTolerance,
-            properties: { false: { type: "number", minimum: 0, maximum: 1 }, true: { type: "number", minimum: 0, maximum: 1 } },
-          },
-          confidence: { type: "null", const: null },
-        },
-      },
+      noulAnswerSchema(),
       {
         type: "object",
         required: ["type", "choice", "probabilities", "confidence"],
@@ -281,8 +271,4 @@ export function canonicalAnswerSchema(): JsonSchema {
       },
     ],
   };
-}
-
-export function publicProfileInputSchema(profile: AnyDecisionProfile): JsonSchema {
-  return profile.inputSchema;
 }

@@ -135,14 +135,8 @@ function validateStageSettings(value: unknown): AgentStageSettings | undefined {
   return result;
 }
 
-function validateInput(value: unknown): TaskAdmissionInput {
-  const root = requireRecord(value);
-  const allowed = [
-    "repoUrl", "ref", "taskPrompt", "validationCommands", "changedFilesAllowlist",
-    "taskMode", "publishMode", "startupCheck", "scouting", "goalSetting",
-  ];
-  requireOnlyKeys(root, allowed, ["repoUrl"]);
-  const repoUrl = requireString(root.repoUrl, 2_048);
+function validateRepoUrl(value: unknown): string {
+  const repoUrl = requireString(value, 2_048);
   let parsedUrl: URL;
   try {
     parsedUrl = new URL(repoUrl);
@@ -153,17 +147,27 @@ function validateInput(value: unknown): TaskAdmissionInput {
     || !parsedUrl.hostname || parsedUrl.username || parsedUrl.password || parsedUrl.search || parsedUrl.hash) {
     throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   }
+  return repoUrl;
+}
+
+function validateInput(value: unknown): TaskAdmissionInput {
+  const root = requireRecord(value);
+  const allowed = [
+    "repoUrl", "ref", "taskPrompt", "validationCommands", "changedFilesAllowlist",
+    "taskMode", "publishMode", "startupCheck", "scouting", "goalSetting",
+  ];
+  requireOnlyKeys(root, allowed, ["repoUrl"]);
   if (root.startupCheck !== undefined && typeof root.startupCheck !== "boolean") {
     throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   }
   return {
-    repoUrl,
+    repoUrl: validateRepoUrl(root.repoUrl),
     ...(root.ref === undefined ? {} : { ref: requireString(root.ref, 256) }),
     ...(root.taskPrompt === undefined ? {} : { taskPrompt: requireString(root.taskPrompt, 16 * 1024, { minCharacters: 10 }) }),
-    ...(root.validationCommands === undefined ? {} : { validationCommands: requireOptionalStringArray(root.validationCommands, 32, 512) }),
-    ...(root.changedFilesAllowlist === undefined ? {} : { changedFilesAllowlist: requireOptionalStringArray(root.changedFilesAllowlist, 64, 512) }),
-    ...(root.taskMode === undefined ? {} : { taskMode: requireOptionalEnum(root.taskMode, TASK_MODES) }),
-    ...(root.publishMode === undefined ? {} : { publishMode: requireOptionalEnum(root.publishMode, PUBLISH_MODES) }),
+    ...(root.validationCommands === undefined ? {} : { validationCommands: requireOptionalStringArray(root.validationCommands, 32, 512)! }),
+    ...(root.changedFilesAllowlist === undefined ? {} : { changedFilesAllowlist: requireOptionalStringArray(root.changedFilesAllowlist, 64, 512)! }),
+    ...(root.taskMode === undefined ? {} : { taskMode: requireOptionalEnum(root.taskMode, TASK_MODES)! }),
+    ...(root.publishMode === undefined ? {} : { publishMode: requireOptionalEnum(root.publishMode, PUBLISH_MODES)! }),
     ...(root.startupCheck === undefined ? {} : { startupCheck: root.startupCheck as boolean }),
     ...(root.scouting === undefined ? {} : { scouting: validateStageSettings(root.scouting) }),
     ...(root.goalSetting === undefined ? {} : { goalSetting: validateStageSettings(root.goalSetting) }),
