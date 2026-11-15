@@ -1,11 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { expect, it } from "vitest";
 import { LIMITS } from "../src/contracts/decisions";
 import { validateDecisionRequest } from "../src/contracts/validation";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 import { soyuzRequest } from "./fixtures/soyuz-request";
 
 // Contract basis: docs/PHASE-1-DECISIONS.md, consumer compatibility and request validation.
-describe("decision request contract", () => {
   it("accepts the Kaseki fixture with object state, nullable criteria, and all three JEV primitives", () => {
     expect(validateDecisionRequest(kasekiRequest)).toMatchObject({
       ok: true,
@@ -152,4 +151,13 @@ describe("decision request contract", () => {
       questions: { q: { type: "choice", instructions: "Choose.", criteria: { first: nested, second: "Other" } } },
     }).ok).toBe(false);
   });
-});
+
+  it("rejects non-finite numbers in request state and structured content", () => {
+    const request = (state: unknown, instructions: unknown) => ({
+      schemaVersion: "1",
+      state,
+      questions: { q: { type: "noul", instructions } },
+    });
+    expect(validateDecisionRequest(request({ score: Number.NaN }, "Is it true?")).ok).toBe(false);
+    expect(validateDecisionRequest(request("bounded", { score: Number.POSITIVE_INFINITY })).ok).toBe(false);
+  });
