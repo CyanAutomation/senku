@@ -381,6 +381,29 @@ const env: Environment = {
   });
 
 describe("shared profile engine", () => {
+  it("maps non-serializable request data to a typed input error before provider invocation", async () => {
+    const profile = profileRegistry.getProfile("run_operations_triage_v1");
+    const cyclicState: Record<string, unknown> = {};
+    cyclicState.self = cyclicState;
+    const buildDecision = vi.spyOn(profile, "buildDecision").mockReturnValue({
+      state: cyclicState as unknown as string,
+      questions: profile.questions,
+    });
+    const fetchImpl = vi.fn(async () => new Response("should not be called"));
+
+    try {
+      await expect(evaluateProfile(
+        "run_operations_triage_v1",
+        runTriageInput,
+        { clientIdentity: "soyuz" },
+        { env, fetchImpl },
+      )).rejects.toMatchObject({ code: "INVALID_PROFILE_INPUT" });
+      expect(fetchImpl).not.toHaveBeenCalled();
+    } finally {
+      buildDecision.mockRestore();
+    }
+  });
+
   it("checks permissions before provider invocation and returns typed answers with safe usage metadata", async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => responseFor(JSON.parse(String(init?.body)) as DecisionRequest));
     const result = await evaluateProfile("task_admission_v1", taskAdmissionInput, { clientIdentity: "kaseki" }, { env, fetchImpl });
