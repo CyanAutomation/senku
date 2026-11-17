@@ -134,7 +134,8 @@ const scenarios = [
     expect(JSON.stringify(await forbidden.json())).not.toContain("task_admission_v1");
   });
 
-  it("retires the generic decision route and ignores caller-supplied identity", async () => {
+  // Contract: docs/CONTRACT.md#retired-generic-decisions-endpoint and #machine-identity-and-permission-matrix.
+  it("retires the generic decision route for both identities and ignores caller-supplied identity", async () => {
     const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => providerResponse(JSON.parse(String(init?.body)) as DecisionRequest));
     const worker = createWorker({ fetchImpl, logger: () => undefined });
     const genericBody = { schemaVersion: "1", state: { facts: ["bounded"] }, questions: {
