@@ -2,8 +2,26 @@ import { LIMITS } from "../contracts/decisions";
 import { ProfileEngineError } from "../contracts/profiles";
 import { isPlainRecord } from "../contracts/records";
 
-// Stop at PEM delimiters so unmatched headers cannot scan through later key blocks.
-const PEM_PRIVATE_KEY_BLOCK = /-----BEGIN [^-]+ PRIVATE KEY-----[^-]*(?:-(?!-{4})[^-]*)*-----END [^-]+ PRIVATE KEY-----/g;
+function redactPemPrivateKeyBlocks(value: string): string {
+  const pemPrivateKeyHeader = /-----BEGIN ([^-\r\n]+ PRIVATE KEY)-----/g;
+  let output = "";
+  let retainedStart = 0;
+  let header: RegExpExecArray | null;
+
+  while ((header = pemPrivateKeyHeader.exec(value)) !== null) {
+    const footer = `-----END ${header[1]}-----`;
+    const footerStart = value.indexOf(footer, pemPrivateKeyHeader.lastIndex);
+
+    output += value.slice(retainedStart, header.index);
+    output += "[REDACTED_PRIVATE_KEY]";
+    if (footerStart === -1) return output;
+
+    retainedStart = footerStart + footer.length;
+    pemPrivateKeyHeader.lastIndex = retainedStart;
+  }
+
+  return output + value.slice(retainedStart);
+}
 
 function isBoundedJson(value: unknown, budget: { nodes: number }, depth: number): boolean {
   budget.nodes += 1;
@@ -42,8 +60,7 @@ export function jsonState(value: unknown): string {
 
 export function redactKasekiEvidence(value: unknown): unknown {
   if (typeof value === "string") {
-    return value
-      .replace(PEM_PRIVATE_KEY_BLOCK, "[REDACTED_PRIVATE_KEY]")
+    return redactPemPrivateKeyBlocks(value)
       .replace(/\bAuthorization\s*:\s*Bearer\s+[^\s,;]+/gi, "Authorization: Bearer [REDACTED_CREDENTIAL]")
       .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{16,}/g, "Bearer [REDACTED_CREDENTIAL]")
       .replace(/\bAKIA[A-Z0-9]{16}\b/g, "[REDACTED_CREDENTIAL]")

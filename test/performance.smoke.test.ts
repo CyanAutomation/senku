@@ -5,6 +5,8 @@ import type { ProfileId } from "../src/auth/permissions";
 import { profileRegistry } from "../src/decisions/profile-registry";
 import { makeTestEnvironment } from "./helpers/environment";
 
+// Benchmark-only: npm run perf:smoke. Wall-clock results are informational and have no pass/fail threshold.
+// Measurement basis: docs/PHASE-2C-DECISIONS.md#discovery-contracts-and-bundle.
 const environment = makeTestEnvironment("performance");
 
 function mockedProviderResponse(request: DecisionRequest): Response {
@@ -35,14 +37,20 @@ function mockedProviderResponse(request: DecisionRequest): Response {
   }), { headers: { "content-type": "application/json" } });
 }
 
-  it("measures permission-scoped discovery and OpenAPI serialization without provider calls", async () => {
+  it("benchmarks permission-scoped discovery and OpenAPI serialization without provider calls", async () => {
     const provider = vi.fn(async () => new Response("{}", { status: 500 }));
     const worker = createWorker({ fetchImpl: provider, logger: () => undefined });
     const scenarios = [
       {
         identity: "kaseki" as const,
         token: environment.SENKU_KASEKI_API_TOKEN!,
-        profiles: ["task_admission_v1", "validation_recovery_v1"],
+        profiles: [
+          "task_admission_v1",
+          "kaseki_goal_check_v1",
+          "kaseki_run_evaluation_v1",
+          "kaseki_context_routing_v1",
+          "validation_recovery_v1",
+        ],
       },
       {
         identity: "soyuz" as const,
@@ -75,23 +83,25 @@ function mockedProviderResponse(request: DecisionRequest): Response {
           expect(response.status).toBe(200);
           expect(response.headers.get("cache-control")).toBe("no-store");
 
-          const document = JSON.parse(body) as Record<string, unknown>;
-          if (endpoint === "/v1/profiles") {
-            const profileIds = (document.profiles as Array<{ id: string }>).map((profile) => profile.id).sort();
-            expect(profileIds).toEqual([...scenario.profiles].sort());
-          } else if (endpoint === "/utcp") {
-            const toolProfileIds = (document.tools as Array<{ tool_call_template: { url: string } }>).map((tool) => {
-              const match = /\/v1\/profiles\/([a-z0-9_]+)\/evaluate$/.exec(tool.tool_call_template.url);
-              expect(match).not.toBeNull();
-              return match![1];
-            }).sort();
-            expect(toolProfileIds).toEqual([...scenario.profiles].sort());
-          } else if (endpoint === "/openapi.json") {
-            const paths = document.paths as Record<string, unknown>;
-            expect(paths).toHaveProperty("/v1/profiles/{profileId}/evaluate");
-            expect(Object.hasOwn(paths, "/v1/decisions")).toBe(false);
-          } else {
-            expect(document.id).toBe(endpoint.split("/").at(-1));
+          if (run === 0) {
+            const document = JSON.parse(body) as Record<string, unknown>;
+            if (endpoint === "/v1/profiles") {
+              const profileIds = (document.profiles as Array<{ id: string }>).map((profile) => profile.id).sort();
+              expect(profileIds).toEqual([...scenario.profiles].sort());
+            } else if (endpoint === "/utcp") {
+              const toolProfileIds = (document.tools as Array<{ tool_call_template: { url: string } }>).map((tool) => {
+                const match = /\/v1\/profiles\/([a-z0-9_]+)\/evaluate$/.exec(tool.tool_call_template.url);
+                expect(match).not.toBeNull();
+                return match![1];
+              }).sort();
+              expect(toolProfileIds).toEqual([...scenario.profiles].sort());
+            } else if (endpoint === "/openapi.json") {
+              const paths = document.paths as Record<string, unknown>;
+              expect(paths).toHaveProperty("/v1/profiles/{profileId}/evaluate");
+              expect(Object.hasOwn(paths, "/v1/decisions")).toBe(false);
+            } else {
+              expect(document.id).toBe(endpoint.split("/").at(-1));
+            }
           }
         }
         results.push({
@@ -111,10 +121,10 @@ function mockedProviderResponse(request: DecisionRequest): Response {
       providerCalls: provider.mock.calls.length,
       results,
     }));
-    expect(results).toHaveLength(11);
+    expect(results).toHaveLength(14);
   });
 
-  it("measures complete HTTP profile evaluations through mocked JEV at representative maximum inputs", async () => {
+  it("benchmarks complete HTTP profile evaluations through mocked JEV at representative maximum inputs", async () => {
     const maxTaskAdmissionInput = {
       repoUrl: "https://github.com/CyanAutomation/senku",
       ref: "r".repeat(256),
@@ -177,7 +187,6 @@ function mockedProviderResponse(request: DecisionRequest): Response {
           headers: { authorization: `Bearer ${scenario.token}`, "content-type": "application/json" },
           body,
         }), environment);
-        expect(response.status).toBe(200);
         const responseBody = await response.json() as {
           schemaVersion: string;
           status: string;
@@ -185,14 +194,17 @@ function mockedProviderResponse(request: DecisionRequest): Response {
           answers: Record<string, unknown>;
           attemptCount: number;
         };
-        expect(responseBody).toMatchObject({
-          schemaVersion: "1",
-          status: "completed",
-          profileId: scenario.id,
-          attemptCount: 1,
-        });
-        expect(Object.keys(responseBody.answers).sort()).toEqual(Object.keys(profile.questions).sort());
         elapsed.push(performance.now() - started);
+        expect(response.status).toBe(200);
+        if (run === 0) {
+          expect(responseBody).toMatchObject({
+            schemaVersion: "1",
+            status: "completed",
+            profileId: scenario.id,
+            attemptCount: 1,
+          });
+          expect(Object.keys(responseBody.answers).sort()).toEqual(Object.keys(profile.questions).sort());
+        }
       }
       const lastLog = logs.at(-1)!;
       expect(lastLog).toMatchObject({
