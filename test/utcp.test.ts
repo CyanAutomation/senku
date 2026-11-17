@@ -8,6 +8,9 @@ import { profileAnswersSchema, profileEvaluationResponseSchema } from "../src/ap
 import { profileRegistry } from "../src/decisions/profile-registry";
 import { createWorker } from "../src/index";
 
+declare const __SENKU_PERF_SMOKE__: boolean;
+const isPerfSmoke = typeof __SENKU_PERF_SMOKE__ !== "undefined" && __SENKU_PERF_SMOKE__;
+
 const KASEKI_TOKEN = "utcp-kaseki-synthetic-token-0123456789abcdef";
 const SOYUZ_TOKEN = "utcp-soyuz-synthetic-token-0123456789abcdef";
 const OPENROUTER_KEY = "synthetic-openrouter-secret-never-in-manual";
@@ -206,9 +209,9 @@ const runTriageRequest = {
       expect(provider).not.toHaveBeenCalled();
       expect(requests[0]).toMatchObject({ method: "GET", pathname: "/utcp", search: "", authorization: `Bearer ${KASEKI_TOKEN}` });
 
-      const started = performance.now();
+      const started = isPerfSmoke ? performance.now() : undefined;
       const result = await client.callTool("senku.assess_task_admission", { request: taskAdmissionRequest }) as Record<string, unknown>;
-      const evaluationWallMs = Number((performance.now() - started).toFixed(2));
+      const evaluationWallMs = started === undefined ? undefined : Number((performance.now() - started).toFixed(2));
       expect(result).toMatchObject({ schemaVersion: "1", status: "completed", profileId: "task_admission_v1", attemptCount: 1 });
       expect(provider).toHaveBeenCalledTimes(1);
       expect(requests[1]).toMatchObject({
@@ -219,7 +222,9 @@ const runTriageRequest = {
         contentType: "application/json",
       });
       expect(JSON.parse(requests[1].body)).toEqual(taskAdmissionRequest);
-      console.log(JSON.stringify({ benchmark: "official UTCP client Kaseki evaluation; mocked provider; local wall time is not billed CPU", evaluationWallMs, providerCalls: provider.mock.calls.length }));
+      if (evaluationWallMs !== undefined) {
+        console.log(JSON.stringify({ benchmark: "official UTCP client Kaseki evaluation; mocked provider; informational local wall time, not billed CPU", evaluationWallMs, providerCalls: provider.mock.calls.length }));
+      }
     } finally {
       await client.close();
     }
@@ -240,14 +245,16 @@ const runTriageRequest = {
       ]);
       expect(provider).not.toHaveBeenCalled();
 
-      const started = performance.now();
+      const started = isPerfSmoke ? performance.now() : undefined;
       const result = await client.callTool("senku.triage_run_evidence", { request: runTriageRequest }) as Record<string, unknown>;
-      const evaluationWallMs = Number((performance.now() - started).toFixed(2));
+      const evaluationWallMs = started === undefined ? undefined : Number((performance.now() - started).toFixed(2));
       expect(result).toMatchObject({ schemaVersion: "1", status: "completed", profileId: "run_operations_triage_v1", attemptCount: 1 });
       expect(provider).toHaveBeenCalledTimes(1);
       expect(requests[1]).toMatchObject({ method: "POST", pathname: "/v1/profiles/run_operations_triage_v1/evaluate", search: "", authorization: `Bearer ${SOYUZ_TOKEN}` });
       expect(JSON.parse(requests[1].body)).toEqual(runTriageRequest);
-      console.log(JSON.stringify({ benchmark: "official UTCP client Soyuz evaluation; mocked provider; local wall time is not billed CPU", evaluationWallMs, providerCalls: provider.mock.calls.length }));
+      if (evaluationWallMs !== undefined) {
+        console.log(JSON.stringify({ benchmark: "official UTCP client Soyuz evaluation; mocked provider; informational local wall time, not billed CPU", evaluationWallMs, providerCalls: provider.mock.calls.length }));
+      }
     } finally {
       await client.close();
     }

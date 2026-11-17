@@ -303,7 +303,8 @@ const env: Environment = {
     expect(() => validationRecoveryProfile.validateInput({ ...validationRecoveryInput, output: "é".repeat(3_001) })).toThrow();
   });
 
-  it("redacts validation secrets before retaining the output tail, including a credential split by the old boundary", () => {
+  // Contract: docs/PROFILES.md#validation_recovery_v1; redaction runs before evidence truncation.
+  it("redacts credentials and unmatched PEM evidence before retaining the output tail", () => {
     const credential = `Bearer ${"A".repeat(64)}`;
     const retained = validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
       command: "npm test",
@@ -313,6 +314,14 @@ const env: Environment = {
     const retainedState = JSON.parse(retained.state as string) as { failure_output: string };
     expect(retainedState.failure_output).toContain("[REDACTED_CREDENTIAL]");
     expect(retainedState.failure_output).not.toContain("A".repeat(64));
+
+    const unmatchedPem = validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
+      command: "npm test",
+      exitCode: 1,
+      output: `safe diagnostic\n-----BEGIN RSA PRIVATE KEY-----\nprivate material without a footer`,
+    }));
+    const unmatchedPemState = JSON.parse(unmatchedPem.state as string) as { failure_output: string };
+    expect(unmatchedPemState.failure_output).toBe("safe diagnostic\n[REDACTED_PRIVATE_KEY]");
 
     const crossingPrefix = "x".repeat(998) + " ";
     const crossingOutput = crossingPrefix + credential + "y".repeat(6_000 - crossingPrefix.length - credential.length);

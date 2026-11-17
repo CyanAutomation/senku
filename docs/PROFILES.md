@@ -83,7 +83,7 @@ Requires bounded evidence and `includeFailureDiagnosis`. It returns the stable a
 
 The profile accepts one of three modes. `tool_output` assesses whether bounded tool-result metadata supports a deterministic local route. `semantic_context` assesses preserve/condense/discard for bounded metadata and an optional redacted goal summary. `phase_transfer` assesses up to 32 bounded scouting facts against a compact goal; Kaseki protects requirements and overflow facts locally. Senku receives no raw output, command text, or source code. All answers are advisory, and Kaseki applies deterministic transformation and safety policy.
 
-Redaction follows Kaseki's `redactJevEvidence()` patterns for private keys, bearer credentials, AWS access key IDs, JWT-shaped tokens, URL passwords, common provider/GitHub/chat tokens, and password/token assignments. Key names matching secret patterns are replaced recursively. These deterministic patterns are not a complete credential detector; callers must continue minimising evidence before sending it.
+Redaction follows Kaseki's `redactJevEvidence()` patterns for private keys, bearer credentials, AWS access key IDs, JWT-shaped tokens, URL passwords, common provider/GitHub/chat tokens, and password/token assignments. Key names matching secret patterns are replaced recursively. When a private-key begin delimiter has no matching end delimiter, redaction replaces that delimiter and the remainder of the current evidence string. These deterministic patterns are not a complete credential detector; callers must continue minimising evidence before sending it.
 
 ## Output and confidence
 
