@@ -4,7 +4,8 @@ import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolvePro
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
 import { kasekiRequest } from "./fixtures/kaseki-request";
 
-// Contract basis: docs/PHASE-1-DECISIONS.md, provider response normalization and metadata policy.
+// Contract: docs/PHASE-1-DECISIONS.md, provider response normalization and metadata policy.
+// This suite covers the full request adapter; helper normalization and diagnostic codes live in provider-response.test.ts.
 const request = kasekiRequest as unknown as DecisionRequest;
 const config: ProviderConfig & { ok: true } = {
   ok: true,
@@ -236,14 +237,11 @@ async function expectProviderError(
     );
   });
 
-  it("rejects empty, malformed, non-JSON, or oversized provider responses", async () => {
+  it("maps content-type, invalid JSON, and oversized provider bodies to safe errors", async () => {
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("")), "INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{", {
       headers: { "content-type": "application/json" },
     })), "INVALID_PROVIDER_RESPONSE", false, "response_body_invalid_json");
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{}", {
-      headers: { "content-type": "text/plain" },
-    })), "INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
 
     const largeResponse = new Response(new ReadableStream<Uint8Array>({
       start(controller) {
@@ -254,14 +252,10 @@ async function expectProviderError(
     await expectProviderError(requestOpenRouterDecision(request, config, async () => largeResponse), "INVALID_PROVIDER_RESPONSE", false, "response_body_too_large");
   });
 
-  it("rejects missing and unexpected answer keys, types, and nested fields", async () => {
+  it("maps answer-set mismatch, wrong types, and nested fields to safe errors", async () => {
     const missing = providerBody();
     delete (missing.answers as Record<string, unknown>).safe_to_retry;
     await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(missing)), "INVALID_PROVIDER_RESPONSE", false, "response_answer_set_mismatch");
-
-    const extra = providerBody();
-    (extra.answers as Record<string, unknown>).unexpected = { type: "noul", noul: 0.5 };
-    await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(extra)), "INVALID_PROVIDER_RESPONSE", false);
 
     const wrongType = providerBody();
     (wrongType.answers as Record<string, Record<string, unknown>>).safe_to_retry.type = "choice";
