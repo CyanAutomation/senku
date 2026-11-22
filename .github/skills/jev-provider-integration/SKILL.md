@@ -1,6 +1,6 @@
 ---
 name: jev-provider-integration
-description: Change Senku's JEV/OpenRouter request, response validation, timeout, provider errors, usage, or provider-facing evidence projection. Use when modifying provider integration behavior.
+description: Change Senku's JEV/OpenRouter request, response validation, timeout, provider errors, usage, or provider-facing evidence projection. Use when modifying provider integration behavior. Pair with api-discovery-contracts or profile-contract-authoring when public contracts also change.
 ---
 
 # JEV provider integration

@@ -1,6 +1,6 @@
 ---
 name: security-workflow-review
-description: Review or change Senku's GitHub Actions workflows, dependency automation, CI permissions, deployment gates, or application security boundaries. Use for CI/CD or security-sensitive changes.
+description: Review or change Senku's GitHub Actions workflows, dependency automation, CI permissions, deployment gates, or cross-cutting application security boundaries. For route, profile, or provider work, use the matching domain skill and add this one only when a shared trust boundary or workflow also changes.
 ---
 
 # Senku security and workflow review
@@ -15,17 +15,21 @@ Review both the workflow and the application boundary it protects. Read `.github
 - The deployment job uses the protected `cloudflare` environment and checks `/healthz`; runtime provider and machine-token secrets are separate Worker secrets.
 - Application credentials identify callers only through bearer authentication. The central profile permission matrix, bounded evidence, fixed provider target, safe errors/logs, and advisory-only outputs are security boundaries.
 
-## Review procedure
+## Review mode
 
 1. Trace triggers, permissions, checkout refs, token persistence, third-party actions, artifact/data flow, environment protection, concurrency, and deployment conditions. Check that untrusted pull request data cannot reach a privileged deployment job.
-2. For workflow changes, add or adjust static validation when it meaningfully catches regressions. Keep actionlint/zizmor and CodeQL wired into CI; do not add broad permissions to suppress findings.
-3. For application security behavior, write a focused regression test before the code change. Cover unauthorized identities, caller-controlled identity or destination attempts, oversized or malformed inputs, secret leakage, and provider non-invocation where relevant.
-4. Preserve pinned action SHAs and inspect upstream action/version changes before updating pins. Keep secrets out of logs and generated artifacts. Do not weaken branch/environment protections or turn routine checks into paid live provider requests.
-5. Update [DEVELOPMENT.md](../../../docs/DEVELOPMENT.md) and repository governance guidance when required checks, secrets, deployment gates, or operator responsibilities change.
+2. Keep reviews read-only. Report findings with file and line, impact, and evidence, and distinguish repository evidence from GitHub settings that cannot be observed in the checkout. Do not edit files or run tests unless the user asks for changes or verification.
+
+## Change mode
+
+1. For workflow changes, add or adjust static validation when it meaningfully catches regressions. Keep actionlint/zizmor and CodeQL wired into CI; do not add broad permissions to suppress findings.
+2. For application security behavior, write a focused regression test before the code change. Cover unauthorized identities, caller-controlled identity or destination attempts, oversized or malformed inputs, secret leakage, and provider non-invocation where relevant.
+3. Preserve pinned action SHAs and inspect upstream action/version changes before updating pins. Keep secrets out of logs and generated artifacts. Do not weaken branch/environment protections or turn routine checks into paid live provider requests.
+4. Update [DEVELOPMENT.md](../../../docs/DEVELOPMENT.md) and repository governance guidance when required checks, secrets, deployment gates, or operator responsibilities change.
 
 ## Validate
 
-Run the relevant local checks and the repository CI equivalents:
+For implementation work, run the relevant local checks and the repository CI equivalents:
 
 ```sh
 npm run typecheck

@@ -80,6 +80,7 @@ nvm use
 npm ci
 cp .dev.vars.example .dev.vars
 npm run typecheck
+npm run validate:skills
 npm test
 npm run perf:smoke
 npm run build
@@ -99,6 +100,7 @@ Routine tests mock the provider and do not incur provider charges. `npm run buil
 - [Phase 2C decisions and measurements](docs/PHASE-2C-DECISIONS.md)
 - [Phase 2B decisions](docs/PHASE-2B-DECISIONS.md)
 - [Phase 2A decisions](docs/PHASE-2A-DECISIONS.md)
+- [Agent skills and selection guidance](.github/skills/README.md)
 
 ## Roadmap
 

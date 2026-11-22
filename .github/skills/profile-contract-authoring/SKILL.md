@@ -1,6 +1,6 @@
 ---
 name: profile-contract-authoring
-description: Create or change Senku decision profiles, their evidence and answer contracts, profile permissions, validation, or profile tests. Use when a task changes a registered profile or adds a new one.
+description: Create or change Senku decision profiles, their evidence and answer contracts, profile permissions, validation, or profile tests. Use when a task changes a registered profile or adds a new one. Pair with api-discovery-contracts for REST or discovery changes and jev-provider-integration for provider behavior.
 ---
 
 # Authoring Senku profile contracts

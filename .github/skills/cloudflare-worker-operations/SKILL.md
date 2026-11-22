@@ -1,11 +1,13 @@
 ---
 name: cloudflare-worker-operations
-description: Develop, configure, troubleshoot, or prepare a deployment of Senku on Cloudflare Workers using the repository's Wrangler setup. Use for runtime, environment, secret, CI deployment, or readiness tasks.
+description: Develop, configure, troubleshoot, or prepare a deployment of Senku on Cloudflare Workers using the repository's Wrangler setup. Use for Worker runtime, environment, secret, deployment, or readiness tasks. Pair with security-workflow-review for GitHub Actions permissions, pins, or deployment gates.
 ---
 
 # Senku Cloudflare Worker operations
 
 Use the checked-in Wrangler configuration and local package scripts as the source of truth. Read [development and operations](../../../docs/DEVELOPMENT.md), [deployment status](../../../docs/PHASE-2D-DEPLOYMENT.md), and `wrangler.jsonc` before changing Worker settings. This project uses Wrangler 4 from `package-lock.json`, Node.js 26, native Fetch/Web Crypto APIs, and no Node.js compatibility mode.
+
+For GitHub Actions triggers, permissions, action pins, or environment protections, also use `security-workflow-review`. This skill owns Worker target, configuration, readiness, and remote-operation details; the security skill owns workflow trust and governance.
 
 ## Safety and deployment boundaries
 

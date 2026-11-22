@@ -27,6 +27,7 @@ Do not commit real credentials or paste them into documentation, shell history, 
 ```sh
 npm run dev
 npm run typecheck
+npm run validate:skills
 npm test
 npm run validate:openapi
 npm run perf:smoke
@@ -34,6 +35,8 @@ npm run build
 ```
 
 The routine test suite uses mocked provider responses and does not incur provider charges. The performance benchmarks are excluded from `npm test` and run through `npm run perf:smoke`. `npm run validate:openapi` independently checks both permission-filtered OpenAPI 3.1 documents with Redocly; `npm test` runs it automatically after the Worker tests. `npm run perf:smoke` benchmarks discovery, OpenAPI serialization, all eight profile contracts, five representative maximum-input evaluation paths, and one official UTCP invocation per identity with mocked provider responses. It reports generated sizes, request/evidence sizes, provider attempts, and local elapsed wall time. Timings are informational only: there are no latency thresholds, and local workerd time is not a measurement of billed Cloudflare CPU. The benchmark command selects only the two UTCP invocation cases; the remaining UTCP contract tests run once in `npm test`. `npm run build` performs Wrangler's dry-run build, does not deploy, and emits the bundle whose size is recorded in [PHASE-2C-DECISIONS.md](PHASE-2C-DECISIONS.md).
+
+`npm run validate:skills` checks `.github/skills` frontmatter, skill-directory names, index coverage, and local Markdown links. CI runs this check as part of `verify`.
 
 The generated OpenAPI document is available at `/openapi.json` when a Worker is running. That route requires one of the configured machine credentials and shows only the authenticated identity's profiles.
 
