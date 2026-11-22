@@ -60,9 +60,7 @@ jobs:
       - name: Lint GitHub workflows
         run: |
           cd .github/actionlint
-          # Scorecard requires cache-mode, which actionlint 1.7.12 does not recognize yet.
           go run github.com/rhysd/actionlint/cmd/actionlint \
-            -ignore 'unexpected key "cache-mode"' \
             ../workflows/*.yml
       - uses: zizmorcore/zizmor-action@45d7276c9ca790aabd705e31ca99c6185c3e76dd # v0.8.1
         with:
