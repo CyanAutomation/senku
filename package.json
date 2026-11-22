@@ -21,7 +21,7 @@
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
-    "@cloudflare/vitest-plugin": "^1.6.0",
+    "@cloudflare/vitest-plugin": "^1.8.2",
     "@redocly/openapi-core": "2.77.0",
     "@utcp/http": "1.1.14",
     "@utcp/sdk": "1.2.0",
