@@ -29,6 +29,14 @@ function parseFrontmatter(markdown, file) {
   return fields;
 }
 
+function validateSkillMetadata(fields, file, directory) {
+  assert.equal(fields.name, directory, `${file} name must match its directory`);
+  assert.match(fields.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+  assert.ok(fields.description != null, `${file} needs a description`);
+  assert.ok(fields.description.length > 0, `${file} needs a description`);
+  assert.ok(fields.description.length <= 1024, `${file} description is too long`);
+}
+
 function markdownFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -47,12 +55,18 @@ test("every skill has valid frontmatter and a matching name", () => {
     const file = skillFile(directory);
     assert.ok(existsSync(file), `${directory} must contain SKILL.md`);
     const fields = parseFrontmatter(readFileSync(file, "utf8"), file);
-
-    assert.equal(fields.name, directory, `${file} name must match its directory`);
-    assert.match(fields.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
-    assert.ok(fields.description.length > 0, `${file} needs a description`);
-    assert.ok(fields.description.length <= 1024, `${file} description is too long`);
+    validateSkillMetadata(fields, file, directory);
   }
+});
+
+test("a missing skill description reports a clear assertion", () => {
+  assert.throws(
+    () => validateSkillMetadata({ name: "sample-skill" }, "sample-skill/SKILL.md", "sample-skill"),
+    {
+      name: "AssertionError",
+      message: "sample-skill/SKILL.md needs a description",
+    },
+  );
 });
 
 test("the skills index covers every skill", () => {
