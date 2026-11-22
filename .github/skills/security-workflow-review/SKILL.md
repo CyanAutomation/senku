@@ -9,10 +9,10 @@ Review both the workflow and the application boundary it protects. Read `.github
 
 ## Existing controls to preserve
 
-- CI checks out without persisted credentials, pins Actions to full commit SHAs, uses least-privilege job permissions, and deploys only from `main` after verification and workflow-security checks.
-- Pull request dependency review blocks high and critical issues in runtime and development dependencies. Dependabot checks npm and GitHub Actions weekly with a cooldown.
-- `workflow-security` runs actionlint and zizmor. CodeQL analyzes JavaScript/TypeScript on pull requests, main pushes, and a weekly schedule.
-- The deployment job uses the protected `cloudflare` environment and checks `/healthz`; runtime provider and machine-token secrets are separate Worker secrets.
+- CI checks out without persisted credentials, pins Actions to full commit SHAs, uses least-privilege job permissions, audits locked npm dependencies, and deploys only from `main` after verification and workflow-security checks, including a production readiness probe.
+- Pull request dependency review blocks newly introduced high and critical issues in runtime and development dependencies. The full lockfile audit has an expiring exception for the current unfixed Zod advisory. Dependabot checks npm, GitHub Actions, and the actionlint Go module weekly with a cooldown.
+- `workflow-security` runs actionlint and zizmor; actionlint's Go module is updated through Dependabot. CodeQL analyzes JavaScript/TypeScript on pull requests, main pushes, and a weekly schedule. Scorecard publishes a weekly supply-chain report and SARIF findings.
+- The deployment job uses the `cloudflare` environment and checks `/healthz` and `/readyz`; runtime provider and machine-token secrets are separate Worker secrets.
 - Application credentials identify callers only through bearer authentication. The central profile permission matrix, bounded evidence, fixed provider target, safe errors/logs, and advisory-only outputs are security boundaries.
 
 ## Review mode

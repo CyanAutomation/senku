@@ -12,3 +12,9 @@ updates:
       interval: weekly
     cooldown:
       default-days: 7
+  - package-ecosystem: gomod
+    directory: /.github/actionlint
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
