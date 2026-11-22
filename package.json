@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && npm run validate:openapi && node --test scripts/wrangler-config.test.mjs",
+    "test": "vitest run && npm run validate:openapi && node --test scripts/wrangler-config.test.mjs scripts/audit-dependencies.test.mjs",
+    "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "validate:openapi": "vitest run --config vitest.openapi.config.ts",
     "validate:skills": "node --test scripts/skills.test.mjs",
     "perf:smoke": "vitest run --config vitest.performance.config.ts --reporter=verbose --maxWorkers=1",
