@@ -150,6 +150,38 @@ function validateRepoUrl(value: unknown): string {
   return repoUrl;
 }
 
+function validateTextFields(root: Record<string, unknown>): Pick<TaskAdmissionInput, "ref" | "taskPrompt"> {
+  return {
+    ...(root.ref === undefined ? {} : { ref: requireString(root.ref, 256) }),
+    ...(root.taskPrompt === undefined ? {} : { taskPrompt: requireString(root.taskPrompt, 16 * 1024, { minCharacters: 10 }) }),
+  };
+}
+
+function validateListFields(root: Record<string, unknown>): Pick<TaskAdmissionInput, "validationCommands" | "changedFilesAllowlist"> {
+  return {
+    ...(root.validationCommands === undefined ? {} : { validationCommands: requireOptionalStringArray(root.validationCommands, 32, 512)! }),
+    ...(root.changedFilesAllowlist === undefined ? {} : { changedFilesAllowlist: requireOptionalStringArray(root.changedFilesAllowlist, 64, 512)! }),
+  };
+}
+
+function validateModeFields(root: Record<string, unknown>): Pick<TaskAdmissionInput, "taskMode" | "publishMode" | "startupCheck"> {
+  if (root.startupCheck !== undefined && typeof root.startupCheck !== "boolean") {
+    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
+  return {
+    ...(root.taskMode === undefined ? {} : { taskMode: requireOptionalEnum(root.taskMode, TASK_MODES)! }),
+    ...(root.publishMode === undefined ? {} : { publishMode: requireOptionalEnum(root.publishMode, PUBLISH_MODES)! }),
+    ...(root.startupCheck === undefined ? {} : { startupCheck: root.startupCheck as boolean }),
+  };
+}
+
+function validateStageFields(root: Record<string, unknown>): Pick<TaskAdmissionInput, "scouting" | "goalSetting"> {
+  return {
+    ...(root.scouting === undefined ? {} : { scouting: validateStageSettings(root.scouting) }),
+    ...(root.goalSetting === undefined ? {} : { goalSetting: validateStageSettings(root.goalSetting) }),
+  };
+}
+
 function validateInput(value: unknown): TaskAdmissionInput {
   const root = requireRecord(value);
   const allowed = [
@@ -157,20 +189,12 @@ function validateInput(value: unknown): TaskAdmissionInput {
     "taskMode", "publishMode", "startupCheck", "scouting", "goalSetting",
   ];
   requireOnlyKeys(root, allowed, ["repoUrl"]);
-  if (root.startupCheck !== undefined && typeof root.startupCheck !== "boolean") {
-    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-  }
   return {
     repoUrl: validateRepoUrl(root.repoUrl),
-    ...(root.ref === undefined ? {} : { ref: requireString(root.ref, 256) }),
-    ...(root.taskPrompt === undefined ? {} : { taskPrompt: requireString(root.taskPrompt, 16 * 1024, { minCharacters: 10 }) }),
-    ...(root.validationCommands === undefined ? {} : { validationCommands: requireOptionalStringArray(root.validationCommands, 32, 512)! }),
-    ...(root.changedFilesAllowlist === undefined ? {} : { changedFilesAllowlist: requireOptionalStringArray(root.changedFilesAllowlist, 64, 512)! }),
-    ...(root.taskMode === undefined ? {} : { taskMode: requireOptionalEnum(root.taskMode, TASK_MODES)! }),
-    ...(root.publishMode === undefined ? {} : { publishMode: requireOptionalEnum(root.publishMode, PUBLISH_MODES)! }),
-    ...(root.startupCheck === undefined ? {} : { startupCheck: root.startupCheck as boolean }),
-    ...(root.scouting === undefined ? {} : { scouting: validateStageSettings(root.scouting) }),
-    ...(root.goalSetting === undefined ? {} : { goalSetting: validateStageSettings(root.goalSetting) }),
+    ...validateTextFields(root),
+    ...validateListFields(root),
+    ...validateModeFields(root),
+    ...validateStageFields(root),
   };
 }
 

@@ -2,7 +2,7 @@ import type { DecisionAnswer, DecisionQuestion } from "../../contracts/decisions
 import type { DecisionProfile, JsonSchema } from "../../contracts/profiles";
 import { ProfileEngineError } from "../../contracts/profiles";
 import { profileOwner } from "../../auth/permissions";
-import { jsonState, redactKasekiEvidence, requireBoundedJsonObject, requireOnlyKeys, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
+import { jsonState, redactKasekiEvidence, requireBoundedJsonObject, requireOnlyKeys, requireOptionalStringArray, requireRecord, requireString, validateAnswersForQuestions } from "../validation";
 import { buildGoalCheckQuestions, type GoalCheckCriterion } from "./workflow-questions";
 
 const PROFILE_ID = "kaseki_goal_check_v1" as const;
@@ -12,6 +12,46 @@ const MAX_STATE_BYTES = 48 * 1024;
 export interface KasekiGoalCheckInput {
   state: Record<string, unknown>;
   criteria: GoalCheckCriterion[];
+}
+
+function validateCriterionId(value: unknown, ids: Set<string>): string {
+  const id = requireString(value, 32);
+  if (!/^criterion_[1-9][0-9]*$/.test(id) || ids.has(id)) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  ids.add(id);
+  return id;
+}
+
+function validateOptionalCriterionFields(item: Record<string, unknown>): Partial<GoalCheckCriterion> {
+  const appliesWhen = item.appliesWhen === undefined ? undefined : requireString(item.appliesWhen, 2_048);
+  const sourceRequirement = item.sourceRequirement === undefined ? undefined : requireString(item.sourceRequirement, 2_048);
+  const verificationSources = item.verificationSources === undefined
+    ? undefined
+    : requireOptionalStringArray(item.verificationSources, 16, 512);
+  return {
+    ...(appliesWhen ? { appliesWhen } : {}),
+    ...(sourceRequirement ? { sourceRequirement } : {}),
+    ...(verificationSources?.length ? { verificationSources } : {}),
+  };
+}
+
+function validateCriterion(value: unknown, ids: Set<string>): GoalCheckCriterion {
+  const item = requireRecord(value);
+  requireOnlyKeys(item, ["id", "criterion", "appliesWhen", "sourceRequirement", "verificationSources"], ["id", "criterion"]);
+  const id = validateCriterionId(item.id, ids);
+  const criterion = requireString(item.criterion, 4_096);
+  return {
+    id,
+    criterion,
+    ...validateOptionalCriterionFields(item),
+  };
+}
+
+function validateCriteria(value: unknown): GoalCheckCriterion[] {
+  if (!Array.isArray(value) || value.length < 1 || value.length > MAX_CRITERIA) {
+    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
+  }
+  const ids = new Set<string>();
+  return value.map((criterion) => validateCriterion(criterion, ids));
 }
 
 const inputSchema: JsonSchema = {
@@ -40,33 +80,7 @@ function validateInput(value: unknown): KasekiGoalCheckInput {
   const root = requireRecord(value);
   requireOnlyKeys(root, ["state", "criteria"], ["state", "criteria"]);
   const state = requireBoundedJsonObject(root.state, MAX_STATE_BYTES);
-  if (!Array.isArray(root.criteria) || root.criteria.length < 1 || root.criteria.length > MAX_CRITERIA) {
-    throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-  }
-  const ids = new Set<string>();
-  const criteria = root.criteria.map((value) => {
-    const item = requireRecord(value);
-    requireOnlyKeys(item, ["id", "criterion", "appliesWhen", "sourceRequirement", "verificationSources"], ["id", "criterion"]);
-    const id = requireString(item.id, 32);
-    if (!/^criterion_[1-9][0-9]*$/.test(id) || ids.has(id)) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-    ids.add(id);
-    const criterion = requireString(item.criterion, 4_096);
-    const appliesWhen = item.appliesWhen === undefined ? undefined : requireString(item.appliesWhen, 2_048);
-    const sourceRequirement = item.sourceRequirement === undefined ? undefined : requireString(item.sourceRequirement, 2_048);
-    let verificationSources: string[] | undefined;
-    if (item.verificationSources !== undefined) {
-      if (!Array.isArray(item.verificationSources) || item.verificationSources.length > 16) {
-        throw new ProfileEngineError("INVALID_PROFILE_INPUT");
-      }
-      verificationSources = item.verificationSources.map((source) => requireString(source, 512));
-    }
-    return {
-      id, criterion,
-      ...(appliesWhen ? { appliesWhen } : {}),
-      ...(sourceRequirement ? { sourceRequirement } : {}),
-      ...(verificationSources?.length ? { verificationSources } : {}),
-    };
-  });
+  const criteria = validateCriteria(root.criteria);
   const questionCount = criteria.reduce((count, criterion) => count + (criterion.appliesWhen ? 2 : 1), 0);
   if (questionCount > 64) throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   return { state, criteria };

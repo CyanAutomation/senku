@@ -52,18 +52,22 @@ function expectedScoreLegend(question: ScoreQuestion): Record<string, string> {
   ]));
 }
 
-function validScoreLegend(value: unknown, question: ScoreQuestion, expectedKeys: string[]): Record<string, string> | null {
-  const canonical = expectedScoreLegend(question);
-  if (value === undefined) return canonical;
-  if (!isRecord(value)) return null;
+function hasExactKeys(value: Record<string, unknown>, expectedKeys: string[]): boolean {
   const actualKeys = Object.keys(value);
-  if (actualKeys.length !== expectedKeys.length || !expectedKeys.every((key) => Object.hasOwn(value, key))) return null;
-  for (const key of expectedKeys) {
-    if (typeof value[key] !== "string" || value[key].length === 0 || Array.from(value[key]).length > 1_000) return null;
-    const criterion = question.criteria[Number(key)];
-    if (typeof criterion === "string" && value[key] !== criterion) return null;
-  }
-  return value as Record<string, string>;
+  return actualKeys.length === expectedKeys.length && expectedKeys.every((key) => Object.hasOwn(value, key));
+}
+
+function isValidScoreLegendEntry(value: unknown, criterion: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || Array.from(value).length > 1_000) return false;
+  return typeof criterion !== "string" || value === criterion;
+}
+
+function validScoreLegend(value: unknown, question: ScoreQuestion, expectedKeys: string[]): Record<string, string> | null {
+  if (value === undefined) return expectedScoreLegend(question);
+  if (!isRecord(value) || !hasExactKeys(value, expectedKeys)) return null;
+  const matchesDeclaredScale = expectedKeys.every((key) =>
+    isValidScoreLegendEntry(value[key], question.criteria[Number(key)]));
+  return matchesDeclaredScale ? value as Record<string, string> : null;
 }
 
 function validateNoulAnswer(value: unknown): NoulAnswer | null {
@@ -97,23 +101,38 @@ function validateChoiceAnswer(value: unknown, question: ChoiceQuestion): ChoiceA
   };
 }
 
-function validateScoreAnswer(value: unknown, question: ScoreQuestion): ScoreAnswer | null {
-  if (!isRecord(value) || !hasOnlyKeys(value, ["type", "score", "legend", "probabilities", "confidence"])
-    || value.type !== "score" || typeof value.score !== "number" || !Number.isFinite(value.score)
-    || value.score < 0 || value.score > question.criteria.length - 1) {
-    return null;
-  }
-  const scoreKeys = question.criteria.map((_criterion, index) => String(index));
-  if (!isExactDistribution(value.probabilities, scoreKeys)) return null;
+function hasValidScoreShape(value: unknown, question: ScoreQuestion): value is Record<string, unknown> {
+  return isRecord(value)
+    && hasOnlyKeys(value, ["type", "score", "legend", "probabilities", "confidence"])
+    && value.type === "score"
+    && typeof value.score === "number"
+    && Number.isFinite(value.score)
+    && value.score >= 0
+    && value.score <= question.criteria.length - 1;
+}
+
+function scoreAnswerMetadata(
+  value: Record<string, unknown>,
+  question: ScoreQuestion,
+  scoreKeys: string[],
+): { legend: Record<string, string>; confidence: number | null } | null {
   const legend = validScoreLegend(value.legend, question, scoreKeys);
   const confidence = optionalConfidence(value.confidence);
-  if (!legend || confidence === undefined) return null;
+  return !legend || confidence === undefined ? null : { legend, confidence };
+}
+
+function validateScoreAnswer(value: unknown, question: ScoreQuestion): ScoreAnswer | null {
+  if (!hasValidScoreShape(value, question)) return null;
+  const scoreKeys = question.criteria.map((_criterion, index) => String(index));
+  if (!isExactDistribution(value.probabilities, scoreKeys)) return null;
+  const metadata = scoreAnswerMetadata(value, question, scoreKeys);
+  if (!metadata) return null;
   return {
     type: "score",
-    score: value.score,
-    legend,
+    score: value.score as number,
+    legend: metadata.legend,
     probabilities: value.probabilities,
-    confidence,
+    confidence: metadata.confidence,
   };
 }
 
@@ -124,16 +143,22 @@ function validateAnswer(value: unknown, question: DecisionQuestion): DecisionAns
   return validateScoreAnswer(value, question);
 }
 
+function isNonNegativeSafeInteger(value: unknown): value is number {
+  return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isNonNegativeFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
 function normalizeUsage(value: unknown): ProviderUsage | undefined {
   if (!isRecord(value)) return undefined;
   const result: ProviderUsage = {};
   for (const key of ["input_tokens", "output_tokens", "total_tokens"] as const) {
     if (value[key] === undefined) continue;
-    if (Number.isSafeInteger(value[key]) && (value[key] as number) >= 0) result[key] = value[key] as number;
+    if (isNonNegativeSafeInteger(value[key])) result[key] = value[key];
   }
-  if (value.cost !== undefined) {
-    if (typeof value.cost === "number" && Number.isFinite(value.cost) && value.cost >= 0) result.cost = value.cost;
-  }
+  if (isNonNegativeFiniteNumber(value.cost)) result.cost = value.cost;
   return Object.keys(result).length > 0 ? result : undefined;
 }
 

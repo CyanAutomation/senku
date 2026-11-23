@@ -109,11 +109,13 @@ const toolDefinitionByProfile = new Map<ProfileId, ToolDefinition>(
   Object.values(toolDefinitions).map((definition) => [definition.profileId, definition]),
 );
 
-function extensionNotes(schema: Record<string, unknown>): string[] {
-  const notes: string[] = [];
+function byteLimitNotes(schema: Record<string, unknown>): string[] {
   const maxBytes = schema["x-maxBytes"];
-  if (typeof maxBytes === "number") notes.push(`Senku also enforces a UTF-8 byte limit of ${maxBytes} bytes.`);
+  return typeof maxBytes === "number" ? [`Senku also enforces a UTF-8 byte limit of ${maxBytes} bytes.`] : [];
+}
 
+function uriConstraintNotes(schema: Record<string, unknown>): string[] {
+  const notes: string[] = [];
   const protocols = schema["x-allowedProtocols"];
   if (Array.isArray(protocols) && protocols.every((value) => typeof value === "string")) {
     notes.push(`Allowed URI schemes: ${protocols.join(", ")}.`);
@@ -121,16 +123,30 @@ function extensionNotes(schema: Record<string, unknown>): string[] {
   if (schema["x-disallowUserInfo"] === true) notes.push("The URI must not contain a username or password.");
   if (schema["x-disallowQuery"] === true) notes.push("The URI must not contain a query string.");
   if (schema["x-disallowFragment"] === true) notes.push("The URI must not contain a fragment.");
+  return notes;
+}
 
+function probabilityConstraintNotes(schema: Record<string, unknown>): string[] {
   const probabilitySum = schema["x-probabilitySum"];
-  if (typeof probabilitySum === "number") {
-    const tolerance = typeof schema["x-probabilityTolerance"] === "number" ? schema["x-probabilityTolerance"] : 0;
-    notes.push(`Senku validates that probabilities sum to ${probabilitySum} within tolerance ${tolerance}.`);
-  }
+  if (typeof probabilitySum !== "number") return [];
+  const tolerance = typeof schema["x-probabilityTolerance"] === "number" ? schema["x-probabilityTolerance"] : 0;
+  return [`Senku validates that probabilities sum to ${probabilitySum} within tolerance ${tolerance}.`];
+}
+
+function contentLimitNotes(schema: Record<string, unknown>): string[] {
+  const notes: string[] = [];
   if (typeof schema["x-maxDepth"] === "number") notes.push(`Senku also enforces a maximum JSON content depth of ${schema["x-maxDepth"]}.`);
   if (typeof schema["x-maxNodes"] === "number") notes.push(`Senku also enforces a maximum of ${schema["x-maxNodes"]} JSON content nodes.`);
-
   return notes;
+}
+
+function extensionNotes(schema: Record<string, unknown>): string[] {
+  return [
+    ...byteLimitNotes(schema),
+    ...uriConstraintNotes(schema),
+    ...probabilityConstraintNotes(schema),
+    ...contentLimitNotes(schema),
+  ];
 }
 
 const schemaMapKeys = new Set([

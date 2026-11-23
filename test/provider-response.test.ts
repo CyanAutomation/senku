@@ -72,8 +72,13 @@ describe("OpenRouter response validation", () => {
     };
     const invalidAnswers = [
       { ...validAnswer, score: 3 },
+      { ...validAnswer, score: -0.01 },
+      { ...validAnswer, score: Number.NaN },
       { ...validAnswer, probabilities: { "0": 0.5, "1": 0.5 } },
       { ...validAnswer, legend: { "0": "wrong", "1": "in progress", "2": "complete" } },
+      { ...validAnswer, legend: { "0": "not started", "1": "", "2": "complete" } },
+      { ...validAnswer, legend: { "0": "not started", "1": "x".repeat(1_001), "2": "complete" } },
+      { ...validAnswer, legend: { "0": 1, "1": "in progress", "2": "complete" } },
       { ...validAnswer, confidence: 1.01 },
     ];
 
@@ -97,6 +102,22 @@ describe("OpenRouter response validation", () => {
       },
     }, request);
     expect(normalized).not.toHaveProperty("usage");
+  });
+
+  it("retains valid zero-valued usage fields while dropping malformed siblings", () => {
+    const normalized = validateProviderPayload({
+      model: "typesafe/jev-1.14-20261014",
+      answers: { q: { type: "noul", noul: 0.5 } },
+      usage: {
+        input_tokens: 0,
+        output_tokens: "unknown",
+        total_tokens: 15,
+        cost: 0,
+        private: "ignored",
+      },
+    }, request);
+
+    expect(normalized.usage).toEqual({ input_tokens: 0, total_tokens: 15, cost: 0 });
   });
 
   it("assigns stable diagnostics to answer sets and values that do not match the request", () => {

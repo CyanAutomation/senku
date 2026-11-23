@@ -211,6 +211,27 @@ const env: Environment = {
     expect(() => kasekiGoalCheckProfile.validateOutput({ ...answers, unexpected: answers.criterion_1 }, input)).toThrow(ProfileEngineError);
   });
 
+  it("accepts the goal-check question limit and rejects repeated or malformed criteria", () => {
+    const criteria = Array.from({ length: 32 }, (_item, index) => ({
+      id: `criterion_${index + 1}`,
+      criterion: `Criterion ${index + 1}.`,
+      appliesWhen: "The condition is relevant.",
+    }));
+    const input = kasekiGoalCheckProfile.validateInput({ state: { evidence: "bounded" }, criteria });
+    expect(Object.keys(kasekiGoalCheckProfile.buildDecision(input).questions)).toHaveLength(64);
+
+    expect(() => kasekiGoalCheckProfile.validateInput({
+      state: { evidence: "bounded" },
+      criteria: [criteria[0], { ...criteria[1], id: criteria[0].id }],
+    })).toThrow(ProfileEngineError);
+    expect(() => kasekiGoalCheckProfile.validateInput({
+      state: { evidence: "bounded" }, criteria: [{ id: "criterion_1", criterion: "Valid.", appliesWhen: "" }],
+    })).toThrow(ProfileEngineError);
+    expect(() => kasekiGoalCheckProfile.validateInput({
+      state: { evidence: "bounded" }, criteria: [{ id: "criterion_1", criterion: "Valid.", verificationSources: [""] }],
+    })).toThrow(ProfileEngineError);
+  });
+
   it("builds a fixed run-evaluation contract with optional failure diagnosis", () => {
     const regular = kasekiRunEvaluationProfile.buildDecision(kasekiRunEvaluationProfile.validateInput(runEvaluationInput));
     const failure = kasekiRunEvaluationProfile.buildDecision(kasekiRunEvaluationProfile.validateInput({
@@ -241,6 +262,48 @@ const env: Environment = {
     expect(Object.keys(kasekiContextRoutingProfile.buildDecision(kasekiContextRoutingProfile.validateInput({
       mode: "semantic_context", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false, goalSummary: "bounded goal" },
     })).questions)).toEqual(["disposition"]);
+  });
+
+  it("validates every optional context-routing metadata field by type and bound", () => {
+    const measurements = {
+      phase: "coding",
+      toolName: "bash",
+      resultKind: "command_output",
+      isError: false,
+      characters: 20,
+      bytes: 20,
+      approximateTokens: 5,
+      lineCount: 1,
+      consecutiveDuplicateLineRatio: 0,
+      hasReadRange: false,
+      overSoftToolOutputTarget: true,
+      changedState: false,
+      containsFailureSignal: false,
+      toolOutputTargetTokens: 1_000,
+      exitStatus: 0,
+      operation: "read",
+      filePath: "src/index.ts",
+    };
+    expect(() => kasekiContextRoutingProfile.validateInput({ mode: "tool_output", evidence: measurements })).not.toThrow();
+    expect(() => kasekiContextRoutingProfile.validateInput({
+      mode: "semantic_context", evidence: { ...measurements, goalSummary: "" },
+    })).not.toThrow();
+
+    const invalidValues = [
+      { overSoftToolOutputTarget: "yes" },
+      { changedState: 1 },
+      { containsFailureSignal: null },
+      { toolOutputTargetTokens: 1.5 },
+      { exitStatus: -1 },
+      { operation: 4 },
+      { filePath: "p".repeat(257) },
+      { goalSummary: "g".repeat(1_201) },
+    ];
+    for (const optionalFields of invalidValues) {
+      expect(() => kasekiContextRoutingProfile.validateInput({
+        mode: "semantic_context", evidence: { ...measurements, ...optionalFields },
+      })).toThrow(ProfileEngineError);
+    }
   });
 
   it("builds the same bounded Soyuz operational projection without accepting extra fields", () => {
@@ -285,6 +348,23 @@ const env: Environment = {
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, taskMode: "full-rewrite" })).toThrow();
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, publishMode: "unsafe" })).toThrow();
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, repoUrl: "https://user:secret@example.test/repo" })).toThrow();
+  });
+
+  it("rejects invalid optional task-admission values and stage settings", () => {
+    const invalidInputs = [
+      { ...taskAdmissionInput, startupCheck: "yes" },
+      { ...taskAdmissionInput, ref: "" },
+      { ...taskAdmissionInput, validationCommands: [""] },
+      { ...taskAdmissionInput, changedFilesAllowlist: [""] },
+      { ...taskAdmissionInput, scouting: { enabled: "yes" } },
+      { ...taskAdmissionInput, scouting: { model: "" } },
+      { ...taskAdmissionInput, goalSetting: { timeoutSeconds: 59 } },
+      { ...taskAdmissionInput, goalSetting: { timeoutSeconds: 10_801 } },
+    ];
+
+    for (const input of invalidInputs) {
+      expect(() => taskAdmissionProfile.validateInput(input)).toThrow(ProfileEngineError);
+    }
   });
 
   it("bounds validation-recovery evidence and exposes no retry policy decision", () => {
@@ -387,6 +467,17 @@ const env: Environment = {
     const outOfScale = rawAnswers(kasekiOutputReviewV2Profile.questions);
     outOfScale.recorded_outcome = { type: "score", score: 4, probabilities: {}, legend: {}, confidence: null };
     expect(() => kasekiOutputReviewV2Profile.validateOutput(outOfScale, kasekiOutputReviewV2Profile.validateInput(outputReviewInput))).toThrow(ProfileEngineError);
+
+    for (const noul of [Number.NaN, -0.01, 1.01]) {
+      const invalidNoul = rawAnswers(taskAdmissionProfile.questions);
+      invalidNoul.contains_credentials = { type: "noul", noul } as DecisionAnswer;
+      expect(() => taskAdmissionProfile.validateOutput(invalidNoul, admissionInput)).toThrow(ProfileEngineError);
+    }
+    for (const noul of [0, 1]) {
+      const validNoul = rawAnswers(taskAdmissionProfile.questions);
+      validNoul.contains_credentials = { type: "noul", noul } as DecisionAnswer;
+      expect(() => taskAdmissionProfile.validateOutput(validNoul, admissionInput)).not.toThrow();
+    }
   });
 
 describe("shared profile engine", () => {

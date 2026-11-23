@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
-import type { DecisionRequest } from "../src/contracts/decisions";
+import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { makeTestEnvironment } from "./helpers/environment";
 import { providerResponse } from "./helpers/provider-response";
 
@@ -169,6 +169,49 @@ const scenarios = [
 
     expect(response.status).toBe(413);
     expect((await response.json() as { error: { code: string } }).error.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+
+  it("rejects requests over the streamed body limit before parsing or provider inference", async () => {
+    const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
+    const worker = createWorker({ fetchImpl, logger: () => undefined });
+    const response = await worker.fetch(new Request("https://senku.test/v1/profiles/task_admission_v1/evaluate", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${KASEKI_TOKEN}`,
+        "content-type": "application/json",
+        "content-length": "1",
+      },
+      body: "x".repeat(LIMITS.requestBytes + 1),
+    }), env);
+
+    expect(response.status).toBe(413);
+    expect((await response.json() as { error: { code: string } }).error.code).toBe("PAYLOAD_TOO_LARGE");
+
+    const declaredOversize = await worker.fetch(new Request("https://senku.test/v1/profiles/task_admission_v1/evaluate", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${KASEKI_TOKEN}`,
+        "content-type": "application/json",
+        "content-length": String(LIMITS.requestBytes + 1),
+      },
+      body: "{}",
+    }), env);
+    expect(declaredOversize.status).toBe(413);
+    expect((await declaredOversize.json() as { error: { code: string } }).error.code).toBe("PAYLOAD_TOO_LARGE");
+
+    const failedStream = new ReadableStream<Uint8Array>({
+      start(controller) { controller.error(new Error("synthetic stream failure")); },
+    });
+    const streamFailure = await worker.fetch(new Request("https://senku.test/v1/profiles/task_admission_v1/evaluate", {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${KASEKI_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: failedStream,
+    }), env);
+    expect(streamFailure.status).toBe(400);
+    expect((await streamFailure.json() as { error: { code: string } }).error.code).toBe("INVALID_REQUEST");
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
