@@ -3,9 +3,9 @@ import { canEvaluateProfile, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
 import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
+import { profileApiError, profileProviderDiagnosticCode } from "./api/profile-errors";
 import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { LIMITS, type Environment } from "./contracts/decisions";
-import { ProfileEngineError } from "./contracts/profiles";
 import { isPlainRecord } from "./contracts/records";
 import { evaluateProfile } from "./decisions/profile-engine";
 import { profileRegistry, type RegisteredProfileId } from "./decisions/profile-registry";
@@ -13,7 +13,6 @@ import {
   DEFAULT_PROVIDER_TIMEOUT_MS,
   MAX_PROVIDER_TIMEOUT_MS,
   MIN_PROVIDER_TIMEOUT_MS,
-  ProviderError,
   resolveProviderConfig,
   type ProviderDiagnosticCode,
 } from "./providers/openrouter/decisions";
@@ -178,30 +177,6 @@ function profileIdFromPath(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-function profileApiError(error: unknown): ApiError {
-  if (error instanceof ApiError) return error;
-  if (error instanceof ProviderError) return new ApiError(error.code, error.retryable);
-  if (error instanceof ProfileEngineError) {
-    switch (error.code) {
-      case "UNKNOWN_PROFILE": return new ApiError("NOT_FOUND");
-      case "FORBIDDEN_PROFILE": return new ApiError("FORBIDDEN");
-      case "INVALID_PROFILE_INPUT": return new ApiError("INVALID_REQUEST");
-      case "PROFILE_INPUT_TOO_LARGE": return new ApiError("PAYLOAD_TOO_LARGE");
-      case "INVALID_PROFILE_CONFIGURATION": return new ApiError("INTERNAL_ERROR");
-      case "INVALID_PROFILE_OUTPUT": return new ApiError("INVALID_PROVIDER_RESPONSE");
-      case "NOT_CONFIGURED": return new ApiError("NOT_CONFIGURED");
-      case "DUPLICATE_PROFILE": return new ApiError("INTERNAL_ERROR");
-    }
-  }
-  return new ApiError("INTERNAL_ERROR");
-}
-
-function profileProviderDiagnosticCode(error: unknown): ProviderDiagnosticCode | undefined {
-  if (error instanceof ProviderError) return error.diagnosticCode;
-  if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") return "profile_output_invalid";
-  return undefined;
 }
 
 function profileInputFromEnvelope(value: unknown): unknown {

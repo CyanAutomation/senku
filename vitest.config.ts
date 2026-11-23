@@ -11,5 +11,10 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     exclude: ["test/openapi-standards.test.ts", "test/performance.smoke.test.ts"],
     globals: false,
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "json"],
+      reportsDirectory: "./coverage",
+    },
   },
 });

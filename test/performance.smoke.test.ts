@@ -4,38 +4,11 @@ import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import type { ProfileId } from "../src/auth/permissions";
 import { profileRegistry } from "../src/decisions/profile-registry";
 import { makeTestEnvironment } from "./helpers/environment";
+import { providerResponse } from "./helpers/provider-response";
 
 // Benchmark-only: npm run perf:smoke. Wall-clock results are informational and have no pass/fail threshold.
 // Measurement basis: docs/PHASE-2C-DECISIONS.md#discovery-contracts-and-bundle.
 const environment = makeTestEnvironment("performance");
-
-function mockedProviderResponse(request: DecisionRequest): Response {
-  const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
-    if (question.type === "noul") return [key, { type: "noul", noul: 0.73 }];
-    if (question.type === "choice") {
-      const keys = Object.keys(question.criteria);
-      return [key, {
-        type: "choice",
-        choice: keys[0],
-        probabilities: Object.fromEntries(keys.map((choice, index) => [choice, index === 0 ? 1 : 0])),
-        confidence: 0.9,
-      }];
-    }
-    const keys = question.criteria.map((_criterion, index) => String(index));
-    return [key, {
-      type: "score",
-      score: 0,
-      legend: Object.fromEntries(question.criteria.map((criterion, index) => [String(index), String(criterion)])),
-      probabilities: Object.fromEntries(keys.map((score, index) => [score, index === 0 ? 1 : 0])),
-      confidence: null,
-    }];
-  }));
-  return new Response(JSON.stringify({
-    model: "typesafe/jev-1.14-20261014",
-    answers,
-    usage: { input_tokens: 18, output_tokens: 0 },
-  }), { headers: { "content-type": "application/json" } });
-}
 
   it("benchmarks permission-scoped discovery and OpenAPI serialization without provider calls", async () => {
     const provider = vi.fn(async () => new Response("{}", { status: 500 }));
@@ -171,7 +144,11 @@ function mockedProviderResponse(request: DecisionRequest): Response {
       const worker = createWorker({
         fetchImpl: async (_input, init) => {
           providerCalls += 1;
-          return mockedProviderResponse(JSON.parse(String(init?.body)) as DecisionRequest);
+          return providerResponse(JSON.parse(String(init?.body)) as DecisionRequest, {
+            noul: 0.73,
+            choiceConfidence: 0.9,
+            usage: { input_tokens: 18, output_tokens: 0 },
+          });
         },
         logger: (record) => logs.push(record as Record<string, unknown>),
       });

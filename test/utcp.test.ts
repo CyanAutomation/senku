@@ -7,6 +7,7 @@ import type { DecisionRequest, Environment } from "../src/contracts/decisions";
 import { profileAnswersSchema, profileEvaluationResponseSchema } from "../src/api/profile-contracts";
 import { profileRegistry } from "../src/decisions/profile-registry";
 import { createWorker } from "../src/index";
+import { providerResponse } from "./helpers/provider-response";
 
 declare const __SENKU_PERF_SMOKE__: boolean;
 const isPerfSmoke = typeof __SENKU_PERF_SMOKE__ !== "undefined" && __SENKU_PERF_SMOKE__;
@@ -35,32 +36,6 @@ interface WorkerRequestRecord {
   body: string;
   responseBody: string;
   status: number;
-}
-
-function providerResponse(request: DecisionRequest): Response {
-  const answers = Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
-    if (question.type === "noul") return [key, { type: "noul", noul: 0.75 }];
-    if (question.type === "choice") {
-      const keys = Object.keys(question.criteria);
-      return [key, {
-        type: "choice",
-        choice: keys[0],
-        probabilities: Object.fromEntries(keys.map((choice, index) => [choice, index === 0 ? 1 : 0])),
-        confidence: null,
-      }];
-    }
-    const keys = question.criteria.map((_criterion, index) => String(index));
-    return [key, {
-      type: "score",
-      score: 0,
-      legend: Object.fromEntries(question.criteria.map((criterion, index) => [String(index), typeof criterion === "string" ? criterion : JSON.stringify(criterion)])),
-      probabilities: Object.fromEntries(keys.map((score, index) => [score, index === 0 ? 1 : 0])),
-      confidence: null,
-    }];
-  }));
-  return new Response(JSON.stringify({ model: "typesafe/jev-1.14-20261014", answers }), {
-    headers: { "content-type": "application/json" },
-  });
 }
 
 function installWorkerFetchBridge(
