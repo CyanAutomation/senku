@@ -415,3 +415,32 @@ const runTriageRequest = {
     const openapi = buildOpenApiDocument("kaseki") as { paths: Record<string, unknown> };
     expect(openapi.paths).toHaveProperty("/utcp");
   });
+
+  it("describes every Senku-specific schema constraint in the UTCP projection", () => {
+    const projected = projectJsonSchemaForUtcp({
+      type: "string",
+      "x-maxBytes": 512,
+      "x-allowedProtocols": ["https:", "http:"],
+      "x-disallowUserInfo": true,
+      "x-disallowQuery": true,
+      "x-disallowFragment": true,
+      "x-probabilitySum": 1,
+      "x-probabilityTolerance": 0.01,
+      "x-maxDepth": 24,
+      "x-maxNodes": 8_192,
+    });
+
+    expect(projected).toEqual({
+      type: "string",
+      description: [
+        "Senku also enforces a UTF-8 byte limit of 512 bytes.",
+        "Allowed URI schemes: https:, http:.",
+        "The URI must not contain a username or password.",
+        "The URI must not contain a query string.",
+        "The URI must not contain a fragment.",
+        "Senku validates that probabilities sum to 1 within tolerance 0.01.",
+        "Senku also enforces a maximum JSON content depth of 24.",
+        "Senku also enforces a maximum of 8192 JSON content nodes.",
+      ].join(" "),
+    });
+  });

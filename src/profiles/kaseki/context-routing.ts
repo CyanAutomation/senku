@@ -47,18 +47,30 @@ function validateToolOutputMeasurements(value: Record<string, unknown>): void {
   }
 }
 
-function validateOptionalToolOutputFields(value: Record<string, unknown>): void {
+function validateOptionalBooleanFields(value: Record<string, unknown>): void {
   for (const key of OPTIONAL_BOOLEAN_FIELDS) {
     if (value[key] !== undefined && typeof value[key] !== "boolean") throw new ProfileEngineError("INVALID_PROFILE_INPUT");
   }
+}
+
+function validateOptionalIntegerFields(value: Record<string, unknown>): void {
   for (const key of OPTIONAL_INTEGER_FIELDS) {
     if (value[key] !== undefined && (!Number.isInteger(value[key]) || (value[key] as number) < 0)) {
       throw new ProfileEngineError("INVALID_PROFILE_INPUT");
     }
   }
+}
+
+function validateOptionalStringFields(value: Record<string, unknown>): void {
   for (const key of OPTIONAL_STRING_FIELDS) {
     if (value[key] !== undefined) requireString(value[key], key === "goalSummary" ? 1_200 : 256, { allowEmpty: key === "goalSummary" });
   }
+}
+
+function validateOptionalToolOutputFields(value: Record<string, unknown>): void {
+  validateOptionalBooleanFields(value);
+  validateOptionalIntegerFields(value);
+  validateOptionalStringFields(value);
 }
 
 function validateToolOutputEvidence(value: Record<string, unknown>, semantic: boolean): Record<string, unknown> {

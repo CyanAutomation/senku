@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { evaluateAuditReport } from "./audit-dependencies.mjs";
+import { evaluateAuditReport, parseAuditOutput } from "./audit-dependencies.mjs";
 
 const knownUnfixedZodAdvisory = {
   vulnerabilities: {
@@ -28,6 +28,16 @@ const knownUnfixedZodAdvisory = {
 };
 
 describe("dependency audit policy", () => {
+  it("parses npm audit output and reports malformed or failed audit responses", () => {
+    assert.deepEqual(parseAuditOutput('{"vulnerabilities":{}}'), { vulnerabilities: {} });
+    assert.throws(() => parseAuditOutput("not json", "npm audit failed"), {
+      message: "npm audit did not return JSON: npm audit failed",
+    });
+    assert.throws(() => parseAuditOutput('{"error":{"summary":"offline"}}'), {
+      message: "npm audit failed: offline",
+    });
+  });
+
   it("temporarily permits the known unfixed Zod advisory and reports the exception", () => {
     const result = evaluateAuditReport(knownUnfixedZodAdvisory, "2026-11-22");
 
@@ -65,6 +75,40 @@ describe("dependency audit policy", () => {
     };
 
     assert.equal(evaluateAuditReport(report, "2026-11-22").findings.length, 1);
+  });
+
+  it("ignores malformed advisory entries without crashing and reports the untraceable finding", () => {
+    const report = {
+      vulnerabilities: {
+        example: {
+          severity: "high",
+          fixAvailable: false,
+          via: [null, "unreported-dependency"],
+        },
+      },
+    };
+
+    assert.deepEqual(evaluateAuditReport(report, "2026-11-22").findings, [{
+      id: "unknown-advisory",
+      packageName: "example",
+      severity: "high",
+      title: "High-severity npm audit entry has no traceable advisory",
+      url: "",
+    }]);
+  });
+
+  it("does not duplicate a high-severity advisory already reported for its vulnerable parent", () => {
+    const report = {
+      vulnerabilities: {
+        parent: {
+          severity: "high",
+          via: [{ url: "https://github.com/advisories/GHSA-AAAA-BBBB-CCCC", severity: "high" }],
+        },
+        child: { severity: "high", via: ["parent"] },
+      },
+    };
+
+    assert.deepEqual(evaluateAuditReport(report, "2026-11-22").findings.map(({ packageName }) => packageName), ["parent"]);
   });
 
   it("fails for the known advisory once a fix is available", () => {

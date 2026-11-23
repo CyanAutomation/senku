@@ -1,19 +1,33 @@
-import type { DecisionAnswer, DecisionQuestion } from "../contracts/decisions";
+import type { DecisionQuestion } from "../contracts/decisions";
 import type { AnswersFor, ProfileQuestions } from "../contracts/profiles";
 import { ProfileEngineError } from "../contracts/profiles";
 import { isPlainRecord } from "../contracts/records";
 
+function noulAnswerMatches(answer: Record<string, unknown>): boolean {
+  const noul = answer.noul;
+  return typeof noul === "number" && Number.isFinite(noul) && noul >= 0 && noul <= 1;
+}
+
+function choiceAnswerMatches(answer: Record<string, unknown>, question: Extract<DecisionQuestion, { type: "choice" }>): boolean {
+  const choice = answer.choice;
+  return typeof choice === "string" && Object.hasOwn(question.criteria, choice);
+}
+
+function scoreAnswerMatches(answer: Record<string, unknown>, question: Extract<DecisionQuestion, { type: "score" }>): boolean {
+  const score = answer.score;
+  return typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= question.criteria.length - 1;
+}
+
 function answerMatchesQuestion(answer: unknown, question: DecisionQuestion): boolean {
-  if (!answer || typeof answer !== "object" || (answer as DecisionAnswer).type !== question.type) return false;
-  if (question.type === "choice") {
-    const choice = (answer as DecisionAnswer & { type: "choice" }).choice;
-    return typeof choice === "string" && Object.hasOwn(question.criteria, choice);
+  if (!answer || typeof answer !== "object" || Array.isArray(answer)) return false;
+  const answerRecord = answer as Record<string, unknown>;
+  if (answerRecord.type !== question.type) return false;
+
+  switch (question.type) {
+    case "noul": return noulAnswerMatches(answerRecord);
+    case "choice": return choiceAnswerMatches(answerRecord, question);
+    case "score": return scoreAnswerMatches(answerRecord, question);
   }
-  if (question.type === "score") {
-    const score = (answer as DecisionAnswer & { type: "score" }).score;
-    return typeof score === "number" && Number.isFinite(score) && score >= 0 && score <= question.criteria.length - 1;
-  }
-  return true;
 }
 
 export function validateAnswersForQuestions<const Questions extends ProfileQuestions>(

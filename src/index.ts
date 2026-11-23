@@ -74,7 +74,12 @@ async function readBoundedRequest(request: Request): Promise<{ bytes: Uint8Array
   }
   if (!request.body) return { bytes: new Uint8Array(), size: 0 };
 
-  const reader = request.body.getReader();
+  const { chunks, size } = await readRequestChunks(request.body);
+  return { bytes: joinRequestChunks(chunks, size), size };
+}
+
+async function readRequestChunks(body: ReadableStream<Uint8Array>): Promise<{ chunks: Uint8Array[]; size: number }> {
+  const reader = body.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
   try {
@@ -94,13 +99,17 @@ async function readBoundedRequest(request: Request): Promise<{ bytes: Uint8Array
   } finally {
     reader.releaseLock();
   }
+  return { chunks, size };
+}
+
+function joinRequestChunks(chunks: Uint8Array[], size: number): Uint8Array {
   const bytes = new Uint8Array(size);
   let offset = 0;
   for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
-  return { bytes, size };
+  return bytes;
 }
 
 function parseJson(bytes: Uint8Array): unknown {
