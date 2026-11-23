@@ -12,6 +12,7 @@
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && npm run validate:openapi && node --test scripts/wrangler-config.test.mjs scripts/audit-dependencies.test.mjs",
+    "test:coverage": "vitest run --coverage",
     "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "validate:openapi": "vitest run --config vitest.openapi.config.ts",
     "validate:skills": "node --test scripts/skills.test.mjs",
@@ -25,6 +26,7 @@
     "@redocly/openapi-core": "2.78.0",
     "@utcp/http": "1.1.14",
     "@utcp/sdk": "1.2.0",
+    "@vitest/coverage-v8": "5.1.0",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.162.0"

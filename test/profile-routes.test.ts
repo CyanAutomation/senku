@@ -2,38 +2,11 @@ import { expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
 import type { DecisionRequest } from "../src/contracts/decisions";
 import { makeTestEnvironment } from "./helpers/environment";
+import { providerResponse } from "./helpers/provider-response";
 
 const env = makeTestEnvironment("profile-route");
 const KASEKI_TOKEN = env.SENKU_KASEKI_API_TOKEN!;
 const SOYUZ_TOKEN = env.SENKU_SOYUZ_API_TOKEN!;
-
-function providerResponse(request: DecisionRequest, options: { usage?: boolean; invalid?: boolean } = {}): Response {
-  const answers = options.invalid ? {} : Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
-    if (question.type === "noul") return [id, { type: "noul", noul: 0.91 }];
-    if (question.type === "choice") {
-      const keys = Object.keys(question.criteria);
-      return [id, {
-        type: "choice",
-        choice: keys[0],
-        probabilities: Object.fromEntries(keys.map((key, index) => [key, index === 0 ? 1 : 0])),
-        confidence: null,
-      }];
-    }
-    const keys = question.criteria.map((_criterion, index) => String(index));
-    return [id, {
-      type: "score",
-      score: 1,
-      legend: Object.fromEntries(question.criteria.map((criterion, index) => [String(index), String(criterion)])),
-      probabilities: Object.fromEntries(keys.map((key, index) => [key, index === 1 ? 1 : 0])),
-      confidence: null,
-    }];
-  }));
-  return new Response(JSON.stringify({
-    model: "typesafe/jev-1.14-20261014",
-    answers,
-    ...(options.usage ? { usage: { input_tokens: 120 } } : {}),
-  }), { headers: { "content-type": "application/json" } });
-}
 
 function request(path: string, options: {
   method?: string;
@@ -71,7 +44,12 @@ const scenarios = [
   it("evaluates each registered profile through the HTTP envelope with one provider attempt", async () => {
     for (const scenario of scenarios) {
       const fetchImpl = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
-        providerResponse(JSON.parse(String(init?.body)) as DecisionRequest, { usage: true }));
+        providerResponse(JSON.parse(String(init?.body)) as DecisionRequest, {
+          noul: 0.91,
+          score: 1,
+          scoreProbabilityIndex: 1,
+          usage: { input_tokens: 120 },
+        }));
       const response = await createWorker({ fetchImpl, logger: () => undefined }).fetch(
         request(`/v1/profiles/${scenario.id}/evaluate`, {
           method: "POST", token: scenario.token, body: { schemaVersion: "1", input: scenario.input }, contentType: "application/json",
