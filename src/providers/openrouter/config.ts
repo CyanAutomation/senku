@@ -28,6 +28,7 @@ export class ProviderError extends Error {
     readonly retryable: boolean,
     readonly diagnosticCode?: ProviderDiagnosticCode,
     readonly upstreamStatus?: number,
+    readonly providerDurationMs?: number,
   ) {
     super(code);
     this.name = "ProviderError";

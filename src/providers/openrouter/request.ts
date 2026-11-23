@@ -12,6 +12,8 @@ export async function requestOpenRouterDecision(
   config: Extract<ProviderConfig, { ok: true }>,
   fetchImpl: typeof fetch = fetch,
 ): Promise<Pick<DecisionResponse, "model" | "answers" | "usage">> {
+  const startedAt = performance.now();
+  const providerDurationMs = () => Math.max(0, Math.round(performance.now() - startedAt));
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   let upstreamStatus: number | undefined;
@@ -62,13 +64,18 @@ export async function requestOpenRouterDecision(
     }
   } catch (error) {
     if (error instanceof ProviderError) {
-      if (error.upstreamStatus === undefined && upstreamStatus !== undefined) {
-        throw new ProviderError(error.code, error.retryable, error.diagnosticCode, upstreamStatus);
-      }
-      throw error;
+      throw new ProviderError(
+        error.code,
+        error.retryable,
+        error.diagnosticCode,
+        error.upstreamStatus ?? upstreamStatus,
+        providerDurationMs(),
+      );
     }
-    if (controller.signal.aborted) throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus);
-    throw new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_unexpected_error", upstreamStatus);
+    if (controller.signal.aborted) {
+      throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs());
+    }
+    throw new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_unexpected_error", upstreamStatus, providerDurationMs());
   } finally {
     clearTimeout(timeout);
   }

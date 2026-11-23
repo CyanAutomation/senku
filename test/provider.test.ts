@@ -63,6 +63,8 @@ async function expectProviderError(
     expect((error as ProviderError).retryable).toBe(retryable);
     if (diagnosticCode) expect((error as ProviderError).diagnosticCode).toBe(diagnosticCode);
     if (upstreamStatus !== undefined) expect((error as ProviderError).upstreamStatus).toBe(upstreamStatus);
+    expect((error as ProviderError).providerDurationMs).toEqual(expect.any(Number));
+    expect((error as ProviderError).providerDurationMs).toBeGreaterThanOrEqual(0);
   }
 }
 

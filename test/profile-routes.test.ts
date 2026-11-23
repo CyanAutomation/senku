@@ -244,6 +244,7 @@ const scenarios = [
       providerDiagnosticCode: "provider_http_error",
       providerHttpStatus: 503,
       providerRetryable: true,
+      providerDurationMs: expect.any(Number),
     });
 
     const invalidOutputLogs: Array<Record<string, unknown>> = [];
