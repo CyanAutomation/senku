@@ -103,6 +103,12 @@ const toolDefinitions = {
     tags: ["decision", "soyuz", "output-review", "v2"],
     description: "Reviews the same bounded canonical run evidence as output-review v1 and also assesses alignment with a recorded outcome. Results are advisory; this tool does not approve, publish, or merge output. Probabilities are not permissions.",
   },
+  review_run_retry_v1: {
+    name: "review_run_retry_v1",
+    profileId: "run_retry_review_v1",
+    tags: ["decision", "soyuz", "retry-review"],
+    description: "Compares bounded canonical status, failure/exit metadata, changed-file counts, and summaries for a retry and its source run. Results are advisory; this tool does not authorize or trigger another retry. Probabilities are not permissions.",
+  },
 } as const satisfies Record<string, ToolDefinition>;
 
 const toolDefinitionByProfile = new Map<ProfileId, ToolDefinition>(
