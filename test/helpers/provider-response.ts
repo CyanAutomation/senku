@@ -10,7 +10,7 @@ interface ProviderResponseOptions {
 }
 
 export function providerResponse(request: DecisionRequest, options: ProviderResponseOptions = {}): Response {
-  const answers = options.invalid ? {} : Object.fromEntries(Object.entries(request.questions).map(([key, question]) => {
+  const answers = options.invalid ? {} : Object.fromEntries(Object.entries(request.questions ?? {}).map(([key, question]) => {
     if (question.type === "noul") return [key, { type: "noul", noul: options.noul ?? 0.75 }];
     if (question.type === "choice") {
       const keys = Object.keys(question.criteria);
