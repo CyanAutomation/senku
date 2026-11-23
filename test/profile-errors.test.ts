@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../src/api/errors";
-import { profileApiError, profileProviderDiagnosticCode } from "../src/api/profile-errors";
+import { profileApiError, profileProviderDiagnosticCode, profileProviderDiagnostics } from "../src/api/profile-errors";
 import { ProfileEngineError } from "../src/contracts/profiles";
 import { ProviderError } from "../src/providers/openrouter/config";
 
@@ -29,10 +29,16 @@ describe("profile error mapping", () => {
   });
 
   it("preserves provider diagnostics and identifies invalid profile output", () => {
-    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid");
+    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid", 401);
     expect(profileProviderDiagnosticCode(providerError)).toBe("response_answer_invalid");
+    expect(profileProviderDiagnostics(providerError)).toEqual({
+      providerDiagnosticCode: "response_answer_invalid",
+      providerHttpStatus: 401,
+      providerRetryable: false,
+    });
     expect(profileProviderDiagnosticCode(new ProfileEngineError("INVALID_PROFILE_OUTPUT"))).toBe("profile_output_invalid");
     expect(profileProviderDiagnosticCode(new ProfileEngineError("INVALID_PROFILE_INPUT"))).toBeUndefined();
     expect(profileProviderDiagnosticCode(new Error("unexpected"))).toBeUndefined();
+    expect(profileProviderDiagnostics(new Error("private details"))).toEqual({});
   });
 });

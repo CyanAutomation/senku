@@ -21,7 +21,26 @@ export function profileApiError(error: unknown): ApiError {
 }
 
 export function profileProviderDiagnosticCode(error: unknown): ProviderDiagnosticCode | undefined {
-  if (error instanceof ProviderError) return error.diagnosticCode;
-  if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") return "profile_output_invalid";
-  return undefined;
+  return profileProviderDiagnostics(error).providerDiagnosticCode;
+}
+
+export interface ProfileProviderDiagnostics {
+  providerDiagnosticCode?: ProviderDiagnosticCode;
+  providerHttpStatus?: number;
+  providerRetryable?: boolean;
+}
+
+/** Returns only bounded, allowlisted fields suitable for operational logs. */
+export function profileProviderDiagnostics(error: unknown): ProfileProviderDiagnostics {
+  if (error instanceof ProviderError) {
+    return {
+      ...(error.diagnosticCode ? { providerDiagnosticCode: error.diagnosticCode } : {}),
+      ...(error.upstreamStatus !== undefined ? { providerHttpStatus: error.upstreamStatus } : {}),
+      providerRetryable: error.retryable,
+    };
+  }
+  if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") {
+    return { providerDiagnosticCode: "profile_output_invalid", providerRetryable: false };
+  }
+  return {};
 }

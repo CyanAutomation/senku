@@ -8,6 +8,9 @@ const MAX_API_KEY_BYTES = 4_096;
 
 export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE" | "INVALID_PROVIDER_RESPONSE";
 export type ProviderDiagnosticCode =
+  | "provider_fetch_failed"
+  | "provider_http_error"
+  | "provider_unexpected_error"
   | "response_body_missing"
   | "response_body_too_large"
   | "response_body_invalid_json"
@@ -24,6 +27,7 @@ export class ProviderError extends Error {
     readonly code: ProviderErrorCode,
     readonly retryable: boolean,
     readonly diagnosticCode?: ProviderDiagnosticCode,
+    readonly upstreamStatus?: number,
   ) {
     super(code);
     this.name = "ProviderError";

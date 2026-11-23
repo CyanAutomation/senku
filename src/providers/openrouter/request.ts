@@ -14,6 +14,7 @@ export async function requestOpenRouterDecision(
 ): Promise<Pick<DecisionResponse, "model" | "answers" | "usage">> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  let upstreamStatus: number | undefined;
   try {
     let response: Response;
     try {
@@ -36,24 +37,38 @@ export async function requestOpenRouterDecision(
       throw new ProviderError(
         controller.signal.aborted ? "PROVIDER_TIMEOUT" : "PROVIDER_UNAVAILABLE",
         true,
+        controller.signal.aborted ? undefined : "provider_fetch_failed",
       );
     }
+    upstreamStatus = response.status;
     if (!response.ok) {
       await response.body?.cancel().catch(() => undefined);
       const retryable = response.status === 408 || response.status === 425
         || response.status === 429 || response.status >= 500;
-      throw new ProviderError("PROVIDER_UNAVAILABLE", retryable);
+      throw new ProviderError("PROVIDER_UNAVAILABLE", retryable, "provider_http_error", response.status);
     }
     const contentType = response.headers.get("content-type");
     if (contentType && !/^\s*application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
       throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
     }
-    const payload = await readBoundedResponse(response);
-    return validateProviderPayload(payload, request);
+    try {
+      const payload = await readBoundedResponse(response);
+      return validateProviderPayload(payload, request);
+    } catch (error) {
+      if (error instanceof ProviderError && error.upstreamStatus === undefined) {
+        throw new ProviderError(error.code, error.retryable, error.diagnosticCode, response.status);
+      }
+      throw error;
+    }
   } catch (error) {
-    if (error instanceof ProviderError) throw error;
-    if (controller.signal.aborted) throw new ProviderError("PROVIDER_TIMEOUT", true);
-    throw new ProviderError("PROVIDER_UNAVAILABLE", true);
+    if (error instanceof ProviderError) {
+      if (error.upstreamStatus === undefined && upstreamStatus !== undefined) {
+        throw new ProviderError(error.code, error.retryable, error.diagnosticCode, upstreamStatus);
+      }
+      throw error;
+    }
+    if (controller.signal.aborted) throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus);
+    throw new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_unexpected_error", upstreamStatus);
   } finally {
     clearTimeout(timeout);
   }

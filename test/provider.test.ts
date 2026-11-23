@@ -52,6 +52,7 @@ async function expectProviderError(
   code: ProviderError["code"],
   retryable: boolean,
   diagnosticCode?: ProviderError["diagnosticCode"],
+  upstreamStatus?: number,
 ) {
   try {
     await promise;
@@ -61,6 +62,7 @@ async function expectProviderError(
     expect((error as ProviderError).code).toBe(code);
     expect((error as ProviderError).retryable).toBe(retryable);
     if (diagnosticCode) expect((error as ProviderError).diagnosticCode).toBe(diagnosticCode);
+    if (upstreamStatus !== undefined) expect((error as ProviderError).upstreamStatus).toBe(upstreamStatus);
   }
 }
 
@@ -209,21 +211,24 @@ async function expectProviderError(
     });
   });
 
-  it("rejects non-2xx responses without returning the upstream body", async () => {
+  it("rejects non-2xx responses with safe status diagnostics and without returning the upstream body", async () => {
     for (const [status, retryable] of [[402, false], [429, true], [503, true]] as const) {
       await expectProviderError(
         requestOpenRouterDecision(request, config, async () => new Response("secret upstream diagnostic", { status })),
         "PROVIDER_UNAVAILABLE",
         retryable,
+        "provider_http_error",
+        status,
       );
     }
   });
 
-  it("classifies network failures and timeouts as retryable without retrying", async () => {
+  it("classifies network failures and timeouts as retryable with safe diagnostics and without retrying", async () => {
     await expectProviderError(
       requestOpenRouterDecision(request, config, async () => { throw new Error("private network detail"); }),
       "PROVIDER_UNAVAILABLE",
       true,
+      "provider_fetch_failed",
     );
 
     const quickTimeoutConfig = { ...config, timeoutMs: 10 };
@@ -250,6 +255,16 @@ async function expectProviderError(
       },
     }));
     await expectProviderError(requestOpenRouterDecision(request, config, async () => largeResponse), "INVALID_PROVIDER_RESPONSE", false, "response_body_too_large");
+  });
+
+  it("retains the HTTP status when an otherwise successful provider response is invalid", async () => {
+    await expectProviderError(
+      requestOpenRouterDecision(request, config, async () => jsonResponse(providerBody({ model: null }))),
+      "INVALID_PROVIDER_RESPONSE",
+      false,
+      "response_model_invalid",
+      200,
+    );
   });
 
   it("maps answer-set mismatch, wrong types, and nested fields to safe errors", async () => {
