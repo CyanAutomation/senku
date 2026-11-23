@@ -235,8 +235,16 @@ const scenarios = [
     expect(failureBody.error.requestId).toMatch(/^dec-/);
     expect(JSON.stringify(failureBody)).not.toContain(evidenceMarker);
     expect(JSON.stringify(failureBody)).not.toContain("upstream private response");
+    expect(JSON.stringify(failureLogs)).not.toContain("upstream private response");
+    expect(JSON.stringify(failureLogs)).not.toContain("test-openrouter-key");
     expect(failureBody).not.toHaveProperty("result");
-    expect(failureLogs.at(-1)).toMatchObject({ event: "profile.evaluation_failed", attemptCount: 1 });
+    expect(failureLogs.at(-1)).toMatchObject({
+      event: "profile.evaluation_failed",
+      attemptCount: 1,
+      providerDiagnosticCode: "provider_http_error",
+      providerHttpStatus: 503,
+      providerRetryable: true,
+    });
 
     const invalidOutputLogs: Array<Record<string, unknown>> = [];
     const invalidOutput = await createWorker({

@@ -3,7 +3,7 @@ import { canEvaluateProfile, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
 import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
-import { profileApiError, profileProviderDiagnosticCode } from "./api/profile-errors";
+import { profileApiError, profileProviderDiagnostics } from "./api/profile-errors";
 import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { LIMITS, type Environment } from "./contracts/decisions";
 import { isPlainRecord } from "./contracts/records";
@@ -135,6 +135,8 @@ function logFailure(
     attemptCount?: number;
     profileId?: string;
     providerDiagnosticCode?: ProviderDiagnosticCode;
+    providerHttpStatus?: number;
+    providerRetryable?: boolean;
     event?: string;
   },
 ): void {
@@ -150,6 +152,8 @@ function logFailure(
     questionCount: details.questionCount,
     providerDurationMs: details.providerDurationMs,
     providerDiagnosticCode: details.providerDiagnosticCode,
+    providerHttpStatus: details.providerHttpStatus,
+    providerRetryable: details.providerRetryable,
     workerDurationMs: details.workerDurationMs,
     attemptCount: details.attemptCount ?? 0,
     profileId: details.profileId,
@@ -301,7 +305,7 @@ function profileEvaluationFailure(
     profileId: details.profileId,
     workerDurationMs: elapsedMs(context.started),
     event: "profile.evaluation_failed",
-    providerDiagnosticCode: profileProviderDiagnosticCode(details.cause),
+    ...profileProviderDiagnostics(details.cause),
   });
   return errorResponse(error, context.id);
 }
