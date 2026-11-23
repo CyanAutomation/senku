@@ -63,6 +63,8 @@ async function expectProviderError(
     expect((error as ProviderError).retryable).toBe(retryable);
     if (diagnosticCode) expect((error as ProviderError).diagnosticCode).toBe(diagnosticCode);
     if (upstreamStatus !== undefined) expect((error as ProviderError).upstreamStatus).toBe(upstreamStatus);
+    expect((error as ProviderError).providerDurationMs).toEqual(expect.any(Number));
+    expect((error as ProviderError).providerDurationMs).toBeGreaterThanOrEqual(0);
   }
 }
 
@@ -239,6 +241,22 @@ async function expectProviderError(
       requestOpenRouterDecision(request, quickTimeoutConfig, hangingFetcher),
       "PROVIDER_TIMEOUT",
       true,
+    );
+  });
+
+  it("classifies unexpected response-processing failures separately from provider failures", async () => {
+    const responseWithBrokenHeaders = {
+      ok: true,
+      status: 200,
+      headers: { get: () => { throw new Error("private response-processing detail"); } },
+    } as unknown as Response;
+
+    await expectProviderError(
+      requestOpenRouterDecision(request, config, async () => responseWithBrokenHeaders),
+      "PROVIDER_UNAVAILABLE",
+      true,
+      "response_processing_failed",
+      200,
     );
   });
 

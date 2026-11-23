@@ -28,6 +28,7 @@ export interface ProfileProviderDiagnostics {
   providerDiagnosticCode?: ProviderDiagnosticCode;
   providerHttpStatus?: number;
   providerRetryable?: boolean;
+  providerDurationMs?: number;
 }
 
 /** Returns only bounded, allowlisted fields suitable for operational logs. */
@@ -37,6 +38,7 @@ export function profileProviderDiagnostics(error: unknown): ProfileProviderDiagn
       ...(error.diagnosticCode ? { providerDiagnosticCode: error.diagnosticCode } : {}),
       ...(error.upstreamStatus !== undefined ? { providerHttpStatus: error.upstreamStatus } : {}),
       providerRetryable: error.retryable,
+      ...(error.providerDurationMs !== undefined ? { providerDurationMs: error.providerDurationMs } : {}),
     };
   }
   if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") {

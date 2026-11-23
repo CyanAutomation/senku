@@ -11,6 +11,7 @@ export type ProviderDiagnosticCode =
   | "provider_fetch_failed"
   | "provider_http_error"
   | "provider_unexpected_error"
+  | "response_processing_failed"
   | "response_body_missing"
   | "response_body_too_large"
   | "response_body_invalid_json"
@@ -28,6 +29,7 @@ export class ProviderError extends Error {
     readonly retryable: boolean,
     readonly diagnosticCode?: ProviderDiagnosticCode,
     readonly upstreamStatus?: number,
+    readonly providerDurationMs?: number,
   ) {
     super(code);
     this.name = "ProviderError";
