@@ -5,6 +5,7 @@ export type ProfileId =
   | "run_operations_triage_v1"
   | "kaseki_output_review_v1"
   | "kaseki_output_review_v2"
+  | "run_retry_review_v1"
   | "task_admission_v1"
   | "kaseki_goal_check_v1"
   | "kaseki_run_evaluation_v1"
@@ -15,6 +16,7 @@ export const PROFILE_CLIENT_PERMISSIONS = {
   run_operations_triage_v1: ["soyuz"],
   kaseki_output_review_v1: ["soyuz"],
   kaseki_output_review_v2: ["soyuz"],
+  run_retry_review_v1: ["soyuz"],
   task_admission_v1: ["kaseki"],
   kaseki_goal_check_v1: ["kaseki"],
   kaseki_run_evaluation_v1: ["kaseki"],
@@ -32,7 +34,7 @@ export function canEvaluateProfile(profileId: string, clientId: ClientIdentity):
 }
 
 export function profileOwner(
-  profileId: "run_operations_triage_v1" | "kaseki_output_review_v1" | "kaseki_output_review_v2",
+  profileId: "run_operations_triage_v1" | "kaseki_output_review_v1" | "kaseki_output_review_v2" | "run_retry_review_v1",
 ): "soyuz";
 export function profileOwner(profileId: "task_admission_v1" | "kaseki_goal_check_v1" | "kaseki_run_evaluation_v1" | "kaseki_context_routing_v1" | "validation_recovery_v1"): "kaseki";
 export function profileOwner(profileId: ProfileId): ProfileOwner {

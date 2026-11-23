@@ -34,6 +34,10 @@ const scenarios = [
   } } },
   { id: "kaseki_output_review_v1", token: SOYUZ_TOKEN, input: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." } },
   { id: "kaseki_output_review_v2", token: SOYUZ_TOKEN, input: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." } },
+  { id: "run_retry_review_v1", token: SOYUZ_TOKEN, input: { retryComparison: {
+    source: { status: "failed", failureClass: "validation_failure", exitCode: 1, changedFileCount: 2, summary: "The original checks failed." },
+    retry: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3, summary: "The retry passed the checks." },
+  } } },
   { id: "task_admission_v1", token: KASEKI_TOKEN, input: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated profile REST API." } },
   { id: "kaseki_goal_check_v1", token: KASEKI_TOKEN, input: { state: { diff: "updated src/worker.ts" }, criteria: [{ id: "criterion_1", criterion: "The worker handles cancellation." }] } },
   { id: "kaseki_run_evaluation_v1", token: KASEKI_TOKEN, input: { state: { validation: "npm test passed" }, includeFailureDiagnosis: false } },
@@ -87,7 +91,7 @@ const scenarios = [
     const soyuz = await worker.fetch(request("/v1/profiles", { token: SOYUZ_TOKEN }), env);
     const soyuzBody = await soyuz.json() as { profiles: Array<{ id: string }> };
     expect(soyuzBody.profiles.map((profile) => profile.id)).toEqual([
-      "run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2",
+      "run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2", "run_retry_review_v1",
     ]);
     expect(JSON.stringify(soyuzBody)).not.toContain("instructions");
     expect(JSON.stringify(soyuzBody)).not.toContain("allowedClients");

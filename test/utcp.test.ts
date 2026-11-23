@@ -134,7 +134,7 @@ const runTriageRequest = {
     expect(kaseki.tools.map((tool) => tool.name)).toEqual([
       "assess_task_admission", "assess_goal_check", "assess_run_evaluation", "route_kaseki_context", "assess_validation_recovery",
     ]);
-    expect(soyuz.tools.map((tool) => tool.name)).toEqual(["triage_run_evidence", "review_kaseki_output_v1", "review_kaseki_output_v2"]);
+    expect(soyuz.tools.map((tool) => tool.name)).toEqual(["triage_run_evidence", "review_kaseki_output_v1", "review_kaseki_output_v2", "review_run_retry_v1"]);
 
     for (const tool of [...kaseki.tools, ...soyuz.tools]) {
       expect(tool.tool_call_template).toMatchObject({
@@ -217,6 +217,7 @@ const runTriageRequest = {
         "senku.triage_run_evidence",
         "senku.review_kaseki_output_v1",
         "senku.review_kaseki_output_v2",
+        "senku.review_run_retry_v1",
       ]);
       expect(provider).not.toHaveBeenCalled();
 

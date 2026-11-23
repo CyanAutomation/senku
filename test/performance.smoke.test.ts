@@ -58,7 +58,7 @@ function discoveryScenarios(): DiscoveryScenario[] {
     {
       identity: "soyuz",
       token: environment.SENKU_SOYUZ_API_TOKEN!,
-      profiles: ["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"],
+      profiles: ["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2", "run_retry_review_v1"],
     },
   ];
 }
@@ -156,6 +156,10 @@ function profileScenarios(): ProfileScenario[] {
     { id: "kaseki_output_review_v2", token: environment.SENKU_SOYUZ_API_TOKEN!, input: { canonicalRun: {
       status: "failed", failureClass: "f".repeat(128), exitCode: 143, changedFileCount: 1_000_000,
     }, summary: "s".repeat(2_000) } },
+    { id: "run_retry_review_v1", token: environment.SENKU_SOYUZ_API_TOKEN!, input: { retryComparison: {
+      source: { status: "failed", failureClass: "f".repeat(128), exitCode: 1, changedFileCount: 1_000_000, summary: "s".repeat(2_000) },
+      retry: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 1_000_000, summary: "r".repeat(2_000) },
+    } } },
     { id: "task_admission_v1", token: environment.SENKU_KASEKI_API_TOKEN!, input: maxTaskAdmissionInput },
     { id: "validation_recovery_v1", token: environment.SENKU_KASEKI_API_TOKEN!, input: {
       command: "npm test", exitCode: 1, output: "x".repeat(6_000),
@@ -254,7 +258,7 @@ it("benchmarks permission-scoped discovery and OpenAPI serialization without pro
     providerCalls: provider.mock.calls.length,
     results,
   }));
-  expect(results).toHaveLength(14);
+  expect(results).toHaveLength(15);
 });
 
 it("benchmarks complete HTTP profile evaluations through mocked JEV at representative maximum inputs", async () => {
@@ -266,6 +270,6 @@ it("benchmarks complete HTTP profile evaluations through mocked JEV at represent
     benchmark: "local workerd full HTTP profile path; mocked provider; wall time is not billed CPU",
     results,
   }));
-  expect(results).toHaveLength(5);
+  expect(results).toHaveLength(6);
   expect(results.map((item) => item.profileId).sort()).toEqual(scenarios.map((item) => item.id).sort());
 });

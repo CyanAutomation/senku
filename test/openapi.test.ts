@@ -13,6 +13,10 @@ const inputs: Record<ProfileId, unknown> = {
   } },
   kaseki_output_review_v1: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: "Implemented and validated." },
   kaseki_output_review_v2: { canonicalRun: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3 }, summary: null },
+  run_retry_review_v1: { retryComparison: {
+    source: { status: "failed", failureClass: "validation_failure", exitCode: 1, changedFileCount: 2, summary: "The original checks failed." },
+    retry: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3, summary: "The retry passed the checks." },
+  } },
   task_admission_v1: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated REST API." },
   kaseki_goal_check_v1: { state: { evidence: "bounded" }, criteria: [{ id: "criterion_1", criterion: "The goal is met." }] },
   kaseki_run_evaluation_v1: { state: { evidence: "bounded" }, includeFailureDiagnosis: false },
@@ -73,7 +77,7 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
     const kasekiIds = listPublicProfiles("kaseki").map((item) => item.id);
     const soyuzIds = listPublicProfiles("soyuz").map((item) => item.id);
     expect(kasekiIds).toEqual(["task_admission_v1", "kaseki_goal_check_v1", "kaseki_run_evaluation_v1", "kaseki_context_routing_v1", "validation_recovery_v1"]);
-    expect(soyuzIds).toEqual(["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2"]);
+    expect(soyuzIds).toEqual(["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2", "run_retry_review_v1"]);
     expect(kasekiIds).not.toContain("run_operations_triage_v1");
     expect(soyuzIds).not.toContain("task_admission_v1");
 

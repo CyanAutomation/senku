@@ -4,6 +4,7 @@ import { allowedClientsForProfile, PROFILE_CLIENT_PERMISSIONS, type ClientIdenti
 import { runOperationsTriageProfile } from "../profiles/soyuz/run-operations-triage";
 import { kasekiOutputReviewV1Profile } from "../profiles/soyuz/output-review-v1";
 import { kasekiOutputReviewV2Profile } from "../profiles/soyuz/output-review-v2";
+import { runRetryReviewProfile } from "../profiles/soyuz/run-retry-review";
 import { taskAdmissionProfile } from "../profiles/kaseki/task-admission";
 import { kasekiGoalCheckProfile } from "../profiles/kaseki/goal-check";
 import { kasekiRunEvaluationProfile } from "../profiles/kaseki/run-evaluation";
@@ -14,6 +15,7 @@ const PROFILE_DEFINITIONS = {
   run_operations_triage_v1: runOperationsTriageProfile,
   kaseki_output_review_v1: kasekiOutputReviewV1Profile,
   kaseki_output_review_v2: kasekiOutputReviewV2Profile,
+  run_retry_review_v1: runRetryReviewProfile,
   task_admission_v1: taskAdmissionProfile,
   kaseki_goal_check_v1: kasekiGoalCheckProfile,
   kaseki_run_evaluation_v1: kasekiRunEvaluationProfile,
