@@ -244,6 +244,22 @@ async function expectProviderError(
     );
   });
 
+  it("classifies unexpected response-processing failures separately from provider failures", async () => {
+    const responseWithBrokenHeaders = {
+      ok: true,
+      status: 200,
+      headers: { get: () => { throw new Error("private response-processing detail"); } },
+    } as unknown as Response;
+
+    await expectProviderError(
+      requestOpenRouterDecision(request, config, async () => responseWithBrokenHeaders),
+      "PROVIDER_UNAVAILABLE",
+      true,
+      "response_processing_failed",
+      200,
+    );
+  });
+
   it("maps content-type, invalid JSON, and oversized provider bodies to safe errors", async () => {
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("")), "INVALID_PROVIDER_RESPONSE", false, "response_content_type_unsupported");
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{", {

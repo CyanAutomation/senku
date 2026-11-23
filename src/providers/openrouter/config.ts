@@ -11,6 +11,7 @@ export type ProviderDiagnosticCode =
   | "provider_fetch_failed"
   | "provider_http_error"
   | "provider_unexpected_error"
+  | "response_processing_failed"
   | "response_body_missing"
   | "response_body_too_large"
   | "response_body_invalid_json"

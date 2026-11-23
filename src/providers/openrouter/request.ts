@@ -75,7 +75,8 @@ export async function requestOpenRouterDecision(
     if (controller.signal.aborted) {
       throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs());
     }
-    throw new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_unexpected_error", upstreamStatus, providerDurationMs());
+    const diagnosticCode = upstreamStatus === undefined ? "provider_unexpected_error" : "response_processing_failed";
+    throw new ProviderError("PROVIDER_UNAVAILABLE", true, diagnosticCode, upstreamStatus, providerDurationMs());
   } finally {
     clearTimeout(timeout);
   }
