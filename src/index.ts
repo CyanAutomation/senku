@@ -139,6 +139,9 @@ function logFailure(
     providerHttpStatus?: number;
     providerRetryable?: boolean;
     providerFetchFailureClass?: ProviderFetchFailureClass;
+    providerErrorType?: "type_error" | "error" | "other";
+    providerCauseDepth?: number;
+    providerCauseCode?: "recognized" | "unrecognized" | "absent";
     event?: string;
   },
 ): void {
@@ -157,6 +160,9 @@ function logFailure(
     providerHttpStatus: details.providerHttpStatus,
     providerRetryable: details.providerRetryable,
     providerFetchFailureClass: details.providerFetchFailureClass,
+    providerErrorType: details.providerErrorType,
+    providerCauseDepth: details.providerCauseDepth,
+    providerCauseCode: details.providerCauseCode,
     workerDurationMs: details.workerDurationMs,
     attemptCount: details.attemptCount ?? 0,
     profileId: details.profileId,

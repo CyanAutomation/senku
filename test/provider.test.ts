@@ -112,6 +112,29 @@ async function expectProviderError(
     }
   });
 
+  it("distinguishes serialization failure from a fetch failure", async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const fetcher = vi.fn();
+    const badRequest = { ...request, state: circular } as unknown as DecisionRequest;
+    await expect(requestOpenRouterDecision(badRequest, config, fetcher)).rejects.toMatchObject({
+      diagnosticCode: "provider_request_serialization_failed",
+      retryable: false,
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it("records a bounded fingerprint for a generic fetch TypeError", async () => {
+    try {
+      await requestOpenRouterDecision(request, config, async () => { throw new TypeError("secret detail", { cause: { code: "SECRET_CODE" } }); });
+      throw new Error("Expected failure");
+    } catch (error) {
+      expect(error).toMatchObject({ providerErrorType: "type_error", providerCauseDepth: 1, providerCauseCode: "unrecognized" });
+      expect(JSON.stringify(error)).not.toContain("SECRET_CODE");
+      expect(JSON.stringify(error)).not.toContain("secret detail");
+    }
+  });
+
   it("allows missing optional confidence and usage without making up metadata", async () => {
     const body = providerBody();
     delete (body.answers.failure_cause as Record<string, unknown>).confidence;

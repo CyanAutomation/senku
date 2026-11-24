@@ -281,6 +281,9 @@ const scenarios = [
       event: "profile.evaluation_failed",
       providerDiagnosticCode: "provider_fetch_failed",
       providerFetchFailureClass: "connection",
+      providerErrorType: "error",
+      providerCauseDepth: 1,
+      providerCauseCode: "recognized",
       providerRetryable: true,
     });
     expect(failureLogs.at(-1)?.providerHttpStatus).toBeUndefined();
