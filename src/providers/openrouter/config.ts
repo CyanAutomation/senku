@@ -12,6 +12,7 @@ export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE" | "I
 export type ProviderDiagnosticCode =
   | "provider_fetch_failed"
   | "provider_request_serialization_failed"
+  | "provider_request_construction_failed"
   | "provider_http_error"
   | "provider_unexpected_error"
   | "response_processing_failed"
