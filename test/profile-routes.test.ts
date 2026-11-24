@@ -265,6 +265,29 @@ const scenarios = [
     expect(JSON.stringify(invalidOutputLogs)).not.toContain("upstream private response");
   });
 
+  it("logs a bounded fetch failure class without exposing the low-level cause", async () => {
+    const privateCause = "private socket detail";
+    const failureLogs: Array<Record<string, unknown>> = [];
+    const response = await createWorker({
+      fetchImpl: async () => { throw new Error(privateCause, { cause: { code: "ECONNREFUSED" } }); },
+      logger: (record) => failureLogs.push(record as Record<string, unknown>),
+    }).fetch(request("/v1/profiles/validation_recovery_v1/evaluate", {
+      method: "POST", token: KASEKI_TOKEN,
+      body: { schemaVersion: "1", input: { command: "npm test", exitCode: 1, output: "safe" } }, contentType: "application/json",
+    }), env);
+
+    expect(response.status).toBe(502);
+    expect(failureLogs.at(-1)).toMatchObject({
+      event: "profile.evaluation_failed",
+      providerDiagnosticCode: "provider_fetch_failed",
+      providerFetchFailureClass: "connection",
+      providerRetryable: true,
+    });
+    expect(failureLogs.at(-1)?.providerHttpStatus).toBeUndefined();
+    expect(JSON.stringify(failureLogs)).not.toContain(privateCause);
+    expect(JSON.stringify(failureLogs)).not.toContain("ECONNREFUSED");
+  });
+
   it("keeps caller evidence out of provider-visible logs", async () => {
     const evidenceMarker = "synthetic-password-do-not-log";
     const logs: Array<Record<string, unknown>> = [];

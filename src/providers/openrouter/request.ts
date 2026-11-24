@@ -3,6 +3,7 @@ import {
   type DecisionResponse,
 } from "../../contracts/decisions";
 import { ProviderError, type ProviderConfig } from "./config";
+import { classifyProviderFetchFailure } from "./fetch-diagnostics";
 import { readBoundedResponse, validateProviderPayload } from "./response";
 
 const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
@@ -35,11 +36,15 @@ export async function requestOpenRouterDecision(
           questions: request.questions,
         }),
       });
-    } catch {
+    } catch (error) {
+      const providerFetchFailureClass = classifyProviderFetchFailure(error, controller.signal.aborted);
       throw new ProviderError(
         controller.signal.aborted ? "PROVIDER_TIMEOUT" : "PROVIDER_UNAVAILABLE",
         true,
         controller.signal.aborted ? undefined : "provider_fetch_failed",
+        undefined,
+        undefined,
+        providerFetchFailureClass,
       );
     }
     upstreamStatus = response.status;
@@ -70,10 +75,11 @@ export async function requestOpenRouterDecision(
         error.diagnosticCode,
         error.upstreamStatus ?? upstreamStatus,
         providerDurationMs(),
+        error.providerFetchFailureClass,
       );
     }
     if (controller.signal.aborted) {
-      throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs());
+      throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs(), "timeout");
     }
     const diagnosticCode = upstreamStatus === undefined ? "provider_unexpected_error" : "response_processing_failed";
     throw new ProviderError("PROVIDER_UNAVAILABLE", true, diagnosticCode, upstreamStatus, providerDurationMs());

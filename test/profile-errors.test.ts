@@ -29,13 +29,14 @@ describe("profile error mapping", () => {
   });
 
   it("preserves provider diagnostics and identifies invalid profile output", () => {
-    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid", 401, 17);
+    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid", 401, 17, "connection");
     expect(profileProviderDiagnosticCode(providerError)).toBe("response_answer_invalid");
     expect(profileProviderDiagnostics(providerError)).toEqual({
       providerDiagnosticCode: "response_answer_invalid",
       providerHttpStatus: 401,
       providerRetryable: false,
       providerDurationMs: 17,
+      providerFetchFailureClass: "connection",
     });
     expect(profileProviderDiagnosticCode(new ProfileEngineError("INVALID_PROFILE_OUTPUT"))).toBe("profile_output_invalid");
     expect(profileProviderDiagnosticCode(new ProfileEngineError("INVALID_PROFILE_INPUT"))).toBeUndefined();
