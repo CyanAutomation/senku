@@ -337,7 +337,8 @@ async function evaluateProfileRequest(
   const questionCount = profile.maxQuestionCount ?? Object.keys(profile.questions).length;
   const trackedFetch: typeof fetch = (input, init) => {
     providerAttempts += 1;
-    return context.fetchImpl(input, init);
+    const fetchImpl = context.fetchImpl;
+    return fetchImpl(input, init);
   };
   try {
     const input = await readBoundedRequest(context.request);
