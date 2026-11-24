@@ -124,6 +124,19 @@ async function expectProviderError(
     expect(fetcher).not.toHaveBeenCalled();
   });
 
+  it("classifies invalid provider headers before attempting fetch without exposing the key", async () => {
+    const fetcher = vi.fn();
+    const invalidKey = "private\nkey";
+    try {
+      await requestOpenRouterDecision(request, { ...config, apiKey: invalidKey }, fetcher);
+      throw new Error("Expected failure");
+    } catch (error) {
+      expect(error).toMatchObject({ diagnosticCode: "provider_request_construction_failed", retryable: false });
+      expect(JSON.stringify(error)).not.toContain("private");
+    }
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
   it("records a bounded fingerprint for a generic fetch TypeError", async () => {
     try {
       await requestOpenRouterDecision(request, config, async () => { throw new TypeError("secret detail", { cause: { code: "SECRET_CODE" } }); });

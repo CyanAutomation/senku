@@ -25,19 +25,25 @@ export async function requestOpenRouterDecision(
     } catch {
       throw new ProviderError("PROVIDER_UNAVAILABLE", false, "provider_request_serialization_failed");
     }
+    const init: RequestInit = {
+      method: "POST",
+      redirect: "manual",
+      signal: controller.signal,
+      headers: {
+        authorization: "Bearer " + config.apiKey,
+        "content-type": "application/json",
+        accept: "application/json",
+      },
+      body,
+    };
+    try {
+      new Request(OPENROUTER_DECISIONS_URL, init);
+    } catch {
+      throw new ProviderError("PROVIDER_UNAVAILABLE", false, "provider_request_construction_failed");
+    }
     let response: Response;
     try {
-      response = await fetchImpl(OPENROUTER_DECISIONS_URL, {
-        method: "POST",
-        redirect: "manual",
-        signal: controller.signal,
-        headers: {
-          authorization: "Bearer " + config.apiKey,
-          "content-type": "application/json",
-          accept: "application/json",
-        },
-        body,
-      });
+      response = await fetchImpl(OPENROUTER_DECISIONS_URL, init);
     } catch (error) {
       const providerFetchFailureClass = classifyProviderFetchFailure(error, controller.signal.aborted);
       const fingerprint = providerErrorFingerprint(error);
