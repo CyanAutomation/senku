@@ -3,7 +3,7 @@ import {
   type DecisionResponse,
 } from "../../contracts/decisions";
 import { ProviderError, type ProviderConfig } from "./config";
-import { classifyProviderFetchFailure } from "./fetch-diagnostics";
+import { classifyProviderFetchFailure, providerErrorFingerprint } from "./fetch-diagnostics";
 import { readBoundedResponse, validateProviderPayload } from "./response";
 
 const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
@@ -19,6 +19,12 @@ export async function requestOpenRouterDecision(
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   let upstreamStatus: number | undefined;
   try {
+    let body: string;
+    try {
+      body = JSON.stringify({ model: config.model, state: request.state, questions: request.questions });
+    } catch {
+      throw new ProviderError("PROVIDER_UNAVAILABLE", false, "provider_request_serialization_failed");
+    }
     let response: Response;
     try {
       response = await fetchImpl(OPENROUTER_DECISIONS_URL, {
@@ -30,14 +36,11 @@ export async function requestOpenRouterDecision(
           "content-type": "application/json",
           accept: "application/json",
         },
-        body: JSON.stringify({
-          model: config.model,
-          state: request.state,
-          questions: request.questions,
-        }),
+        body,
       });
     } catch (error) {
       const providerFetchFailureClass = classifyProviderFetchFailure(error, controller.signal.aborted);
+      const fingerprint = providerErrorFingerprint(error);
       throw new ProviderError(
         controller.signal.aborted ? "PROVIDER_TIMEOUT" : "PROVIDER_UNAVAILABLE",
         true,
@@ -45,6 +48,9 @@ export async function requestOpenRouterDecision(
         undefined,
         undefined,
         providerFetchFailureClass,
+        fingerprint.providerErrorType,
+        fingerprint.providerCauseDepth,
+        fingerprint.providerCauseCode,
       );
     }
     upstreamStatus = response.status;
@@ -76,6 +82,9 @@ export async function requestOpenRouterDecision(
         error.upstreamStatus ?? upstreamStatus,
         providerDurationMs(),
         error.providerFetchFailureClass,
+        error.providerErrorType,
+        error.providerCauseDepth,
+        error.providerCauseCode,
       );
     }
     if (controller.signal.aborted) {

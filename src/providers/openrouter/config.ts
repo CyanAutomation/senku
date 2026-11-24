@@ -1,5 +1,6 @@
 import type { Environment } from "../../contracts/decisions";
 import type { ProviderFetchFailureClass } from "./fetch-diagnostics";
+import type { ProviderCauseCode, ProviderErrorType } from "./fetch-diagnostics";
 
 export const DEFAULT_JEV_MODEL = "~typesafe/jev-latest";
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
@@ -10,6 +11,7 @@ const MAX_API_KEY_BYTES = 4_096;
 export type ProviderErrorCode = "PROVIDER_TIMEOUT" | "PROVIDER_UNAVAILABLE" | "INVALID_PROVIDER_RESPONSE";
 export type ProviderDiagnosticCode =
   | "provider_fetch_failed"
+  | "provider_request_serialization_failed"
   | "provider_http_error"
   | "provider_unexpected_error"
   | "response_processing_failed"
@@ -32,6 +34,9 @@ export class ProviderError extends Error {
     readonly upstreamStatus?: number,
     readonly providerDurationMs?: number,
     readonly providerFetchFailureClass?: ProviderFetchFailureClass,
+    readonly providerErrorType?: ProviderErrorType,
+    readonly providerCauseDepth?: number,
+    readonly providerCauseCode?: ProviderCauseCode,
   ) {
     super(code);
     this.name = "ProviderError";

@@ -4,7 +4,7 @@ import { ApiError, errorResponse } from "./api/errors";
 import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
 import { profileApiError, profileProviderDiagnostics } from "./api/profile-errors";
-import type { ProviderFetchFailureClass } from "./providers/openrouter/fetch-diagnostics";
+import type { ProviderCauseCode, ProviderErrorType, ProviderFetchFailureClass } from "./providers/openrouter/fetch-diagnostics";
 import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
 import { LIMITS, type Environment } from "./contracts/decisions";
 import { isPlainRecord } from "./contracts/records";
@@ -139,6 +139,9 @@ function logFailure(
     providerHttpStatus?: number;
     providerRetryable?: boolean;
     providerFetchFailureClass?: ProviderFetchFailureClass;
+    providerErrorType?: ProviderErrorType;
+    providerCauseDepth?: number;
+    providerCauseCode?: ProviderCauseCode;
     event?: string;
   },
 ): void {
@@ -157,6 +160,9 @@ function logFailure(
     providerHttpStatus: details.providerHttpStatus,
     providerRetryable: details.providerRetryable,
     providerFetchFailureClass: details.providerFetchFailureClass,
+    providerErrorType: details.providerErrorType,
+    providerCauseDepth: details.providerCauseDepth,
+    providerCauseCode: details.providerCauseCode,
     workerDurationMs: details.workerDurationMs,
     attemptCount: details.attemptCount ?? 0,
     profileId: details.profileId,
