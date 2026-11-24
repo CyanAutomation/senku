@@ -94,6 +94,24 @@ async function expectProviderError(
     expect(result.usage).toEqual({ input_tokens: 420, output_tokens: 30, cost: 0.0001 });
   });
 
+  it("classifies fetch rejections without retaining raw causes or response status", async () => {
+    const failure = new Error("private network detail", { cause: { code: "ECONNREFUSED" } });
+    try {
+      await requestOpenRouterDecision(request, config, async () => { throw failure; });
+      throw new Error("Expected provider request to fail.");
+    } catch (error) {
+      expect(error).toBeInstanceOf(ProviderError);
+      expect(error).toMatchObject({
+        code: "PROVIDER_UNAVAILABLE",
+        diagnosticCode: "provider_fetch_failed",
+        providerFetchFailureClass: "connection",
+        providerDurationMs: expect.any(Number),
+      });
+      expect((error as ProviderError).upstreamStatus).toBeUndefined();
+      expect(JSON.stringify(error)).not.toContain("private network detail");
+    }
+  });
+
   it("allows missing optional confidence and usage without making up metadata", async () => {
     const body = providerBody();
     delete (body.answers.failure_cause as Record<string, unknown>).confidence;

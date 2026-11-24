@@ -1,6 +1,7 @@
 import { ApiError } from "./errors";
 import { ProfileEngineError } from "../contracts/profiles";
 import { ProviderError, type ProviderDiagnosticCode } from "../providers/openrouter/config";
+import type { ProviderFetchFailureClass } from "../providers/openrouter/fetch-diagnostics";
 
 const PROFILE_API_ERROR_CODES: Record<ProfileEngineError["code"], ApiError["code"]> = {
   UNKNOWN_PROFILE: "NOT_FOUND",
@@ -29,6 +30,7 @@ export interface ProfileProviderDiagnostics {
   providerHttpStatus?: number;
   providerRetryable?: boolean;
   providerDurationMs?: number;
+  providerFetchFailureClass?: ProviderFetchFailureClass;
 }
 
 /** Returns only bounded, allowlisted fields suitable for operational logs. */
@@ -39,6 +41,7 @@ export function profileProviderDiagnostics(error: unknown): ProfileProviderDiagn
       ...(error.upstreamStatus !== undefined ? { providerHttpStatus: error.upstreamStatus } : {}),
       providerRetryable: error.retryable,
       ...(error.providerDurationMs !== undefined ? { providerDurationMs: error.providerDurationMs } : {}),
+      ...(error.providerFetchFailureClass ? { providerFetchFailureClass: error.providerFetchFailureClass } : {}),
     };
   }
   if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") {

@@ -1,4 +1,5 @@
 import type { Environment } from "../../contracts/decisions";
+import type { ProviderFetchFailureClass } from "./fetch-diagnostics";
 
 export const DEFAULT_JEV_MODEL = "~typesafe/jev-latest";
 export const DEFAULT_PROVIDER_TIMEOUT_MS = 15_000;
@@ -30,6 +31,7 @@ export class ProviderError extends Error {
     readonly diagnosticCode?: ProviderDiagnosticCode,
     readonly upstreamStatus?: number,
     readonly providerDurationMs?: number,
+    readonly providerFetchFailureClass?: ProviderFetchFailureClass,
   ) {
     super(code);
     this.name = "ProviderError";
