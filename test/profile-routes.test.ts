@@ -75,6 +75,22 @@ const scenarios = [
     }
   });
 
+  it("invokes the provider fetch without binding it to the request context", async () => {
+    let receiver: unknown = "not called";
+    const fetchImpl: typeof fetch = async function (this: unknown, _input, init) {
+      receiver = this;
+      return providerResponse(JSON.parse(String(init?.body)) as DecisionRequest);
+    };
+    const response = await createWorker({ fetchImpl, logger: () => undefined }).fetch(
+      request("/v1/profiles/run_operations_triage_v1/evaluate", {
+        method: "POST", token: SOYUZ_TOKEN,
+        body: { schemaVersion: "1", input: scenarios[0].input }, contentType: "application/json",
+      }), env,
+    );
+    expect(response.status).toBe(200);
+    expect(receiver).toBeUndefined();
+  });
+
   it("authenticates discovery and hides profiles outside the caller's permissions", async () => {
     const worker = createWorker({ fetchImpl: vi.fn(async () => providerResponse({} as DecisionRequest)), logger: () => undefined });
     const unauthenticated = await worker.fetch(request("/v1/profiles"), env);
