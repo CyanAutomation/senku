@@ -11,6 +11,7 @@ Profiles never accept caller-supplied question definitions, provider URLs, or mo
 | `run_operations_triage_v1` | Soyuz | Run status, stage, operational health, failure class, lifecycle timestamps | 12 KiB | 3 |
 | `kaseki_output_review_v1` | Soyuz | Canonical run status, failure class, exit code, changed-file count, summary up to 2,000 characters | 8 KiB | 3 |
 | `kaseki_output_review_v2` | Soyuz | Same bounded evidence as v1 plus recorded-outcome scoring | 8 KiB | 4 |
+| `run_retry_review_v1` | Soyuz | Bounded canonical records for a source run and its retry | 20 KiB | 3 |
 | `task_admission_v1` | Kaseki | Repository URL/ref, task prompt, validation commands, allowlist, task/publish modes, stage settings | 32 KiB | 6 |
 | `kaseki_goal_check_v1` | Kaseki | Bounded run evidence and 1–32 normalized success criteria | 48 KiB | Up to 64 (dynamic) |
 | `kaseki_run_evaluation_v1` | Kaseki | Bounded run evidence and an optional failure-diagnosis flag | 96 KiB | 3 or 5 (dynamic) |
@@ -32,6 +33,7 @@ Authenticated `GET /utcp` publishes these profile tools using the central permis
 | `triage_run_evidence` | `run_operations_triage_v1` | Soyuz |
 | `review_kaseki_output_v1` | `kaseki_output_review_v1` | Soyuz |
 | `review_kaseki_output_v2` | `kaseki_output_review_v2` | Soyuz |
+| `review_run_retry_v1` | `run_retry_review_v1` | Soyuz |
 
 The published manual is discovery metadata. It does not add an execution or inference route, and every result remains advisory. See [UTCP.md](UTCP.md) for client-side authentication and request mapping.
 
@@ -58,6 +60,10 @@ Require `canonicalRun` with status, nullable failure class, nullable integer exi
 Kaseki's scheduler uses `-1` when a process exit code is unavailable, and uses normal OS/signal-derived values such as `143` on termination. Soyuz's stored run row preserves the integer; its failed/cancelled callback schemas also accept integer exit codes. The bounded compatibility policy is therefore `-1..255`: it preserves the observed unknown sentinel, ordinary process codes, and common signal-derived statuses while rejecting other negatives and implausibly large values. Completed Soyuz callbacks still require zero.
 
 V1 returns `summary_specificity`, `outcome_alignment`, and `evidence_strength`. V2 adds `recorded_outcome`. These IDs preserve the existing answer meanings and scales; V2 does not silently replace V1.
+
+### `run_retry_review_v1`
+
+Requires a `retryComparison` containing `source` and `retry` records. Each record includes status, nullable failure class, nullable exit code, nullable changed-file count, and a summary string or `null`. Summaries are capped at 2,000 characters; counts and exit codes are range-checked. Soyuz must verify the retry relationship and matching origin before projecting either record. The profile returns `recovery`, `evidence_strength`, and `needs_followup`; it is advisory and cannot authorize or trigger another retry.
 
 ### `task_admission_v1`
 
