@@ -124,6 +124,25 @@ const runs = new Map<string, RetainedRun>([
     origin_id: "synthetic-dashboard-user",
     request_json: JSON.stringify({ taskPrompt: "SYNTHETIC_SOYUZ_TASK_PROMPT_MUST_STAY_IN_SOYUZ" }),
   }],
+  ["44444444-4444-4444-8444-444444444444", {
+    id: "44444444-4444-4444-8444-444444444444",
+    status: "completed",
+    stage: null,
+    operational_health: "healthy",
+    failure_class: null,
+    created_at: "2026-11-08T12:10:00.000Z",
+    queued_at: "2026-11-08T12:10:01.000Z",
+    started_at: "2026-11-08T12:10:02.000Z",
+    completed_at: "2026-11-08T12:10:10.000Z",
+    last_heartbeat_at: "2026-11-08T12:10:09.000Z",
+    // Deliberately malformed retained data to exercise the bounded Senku projection.
+    exit_code: 9_999,
+    result_json: JSON.stringify({ summary: "The exit code is malformed in this retained record.", changedFileCount: 1 }),
+    retry_of: null,
+    origin_type: "dashboard",
+    origin_id: "synthetic-dashboard-user",
+    request_json: JSON.stringify({ taskPrompt: "SYNTHETIC_SOYUZ_TASK_PROMPT_MUST_STAY_IN_SOYUZ" }),
+  }],
 ]);
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -159,13 +178,15 @@ function boundedChangedFileCount(row: RetainedRun): number | null {
     : null;
 }
 
+function boundedExitCode(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= -1 && value <= 255 ? value : null;
+}
+
 function retryEvidence(row: RetainedRun): Record<string, unknown> {
-  const exitCode = typeof row.exit_code === "number" && Number.isInteger(row.exit_code)
-      && row.exit_code >= -1 && row.exit_code <= 255 ? row.exit_code : null;
   return {
     status: row.status,
     failureClass: typeof row.failure_class === "string" && row.failure_class.length <= 128 ? row.failure_class : null,
-    exitCode,
+    exitCode: boundedExitCode(row.exit_code),
     changedFileCount: boundedChangedFileCount(row),
     summary: boundedSummary(row),
   };
@@ -193,7 +214,7 @@ function buildSenkuInput(profileId: SoyuzProfileId, row: RetainedRun, source?: R
         canonicalRun: {
           status: row.status,
           failureClass: row.failure_class,
-          exitCode: row.exit_code,
+          exitCode: boundedExitCode(row.exit_code),
           changedFileCount: boundedChangedFileCount(row),
         },
         summary: boundedSummary(row),
@@ -353,7 +374,8 @@ function mapSenkuFailure(status: number, payload: unknown): Response {
 }
 
 async function handleAnalysis(request: Request, env: SoyuzEnvironment): Promise<Response> {
-  if (request.headers.get("authorization") !== `Bearer ${env.SOYUZ_SIMULATOR_USER_TOKEN}`) {
+  if (!env.SOYUZ_SIMULATOR_USER_TOKEN?.trim()
+    || request.headers.get("authorization") !== `Bearer ${env.SOYUZ_SIMULATOR_USER_TOKEN}`) {
     return jsonResponse({ error: { code: "UNAUTHENTICATED", message: "Authentication is required." } }, 401);
   }
   if (!env.SENKU_SOYUZ_API_TOKEN?.trim()) {

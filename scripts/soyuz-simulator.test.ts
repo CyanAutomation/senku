@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { createTestHarness } from "wrangler";
 import type { DecisionRequest } from "../src/contracts/decisions.ts";
 import { providerResponse } from "../test/helpers/provider-response.ts";
+import soyuzSimulatorWorker from "../test/soyuz-simulator/worker.ts";
 
 const SOYUZ_USER_TOKEN = "soyuz-simulator-user-token-0000000000000000";
 const SOYUZ_MACHINE_TOKEN = "soyuz-simulator-machine-token-0000000000000000";
@@ -12,11 +13,13 @@ const TASK_MARKER = "SYNTHETIC_SOYUZ_TASK_PROMPT_MUST_STAY_IN_SOYUZ";
 const OPENROUTER_URL = "https://openrouter.ai/api/alpha/decisions";
 const SOURCE_RUN_ID = "11111111-1111-4111-8111-111111111111";
 const RETRY_RUN_ID = "22222222-2222-4222-8222-222222222222";
+const INVALID_EXIT_CODE_RUN_ID = "44444444-4444-4444-8444-444444444444";
 
 const scenarios = [
   { profileId: "run_operations_triage_v1", runId: SOURCE_RUN_ID, answers: ["needs_followup", "likely_area", "severity"] },
   { profileId: "kaseki_output_review_v1", runId: RETRY_RUN_ID, answers: ["summary_specificity", "outcome_alignment", "evidence_strength"] },
   { profileId: "kaseki_output_review_v2", runId: RETRY_RUN_ID, answers: ["summary_specificity", "outcome_alignment", "evidence_strength", "recorded_outcome"] },
+  { profileId: "kaseki_output_review_v2", runId: INVALID_EXIT_CODE_RUN_ID, answers: ["summary_specificity", "outcome_alignment", "evidence_strength", "recorded_outcome"] },
   { profileId: "run_retry_review_v1", runId: RETRY_RUN_ID, answers: ["recovery", "evidence_strength", "needs_followup"] },
 ] as const;
 
@@ -92,7 +95,7 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
     const input = dashboardRequest(scenario.profileId, scenario.runId);
     const response = await soyuz.fetch(input.url, input.init);
     const body = await response.json() as { data?: { model?: string; answers?: Record<string, unknown> } };
-    assert.equal(response.status, 200, JSON.stringify(body));
+    assert.equal(response.status, 200, `${scenario.profileId}: ${JSON.stringify(body)}`);
     assert.deepEqual(Object.keys(body.data ?? {}).sort(), ["answers", "model"]);
     assert.equal(body.data?.model, "typesafe/jev-1.14-20261014");
     assert.deepEqual(Object.keys(body.data?.answers ?? {}).sort(), [...scenario.answers].sort());
@@ -104,6 +107,7 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
 
     const state = JSON.parse(String(providerRequest.state)) as Record<string, unknown>;
     if (scenario.profileId === "run_operations_triage_v1") {
+      // Assert Senku's provider-facing projection, which adds its own source marker to the Soyuz input.
       assert.deepEqual(Object.keys(state).sort(), ["run", "source"]);
       assert.equal((state.run as Record<string, unknown>).status, "failed");
       assert.deepEqual(Object.keys(state.run as Record<string, unknown>).sort(), [
@@ -121,7 +125,13 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
     } else {
       assert.deepEqual(Object.keys(state).sort(), ["canonicalRun", "kasekiAgentOutput", "note", "source"]);
       assert.equal((state.canonicalRun as Record<string, unknown>).status, "completed");
-      assert.equal(((state.kasekiAgentOutput as Record<string, unknown>).summary), "The retry passed validation.");
+      const expectedSummary = scenario.runId === INVALID_EXIT_CODE_RUN_ID
+        ? "The exit code is malformed in this retained record."
+        : "The retry passed validation.";
+      assert.equal((state.kasekiAgentOutput as Record<string, unknown>).summary, expectedSummary);
+      if (scenario.runId === INVALID_EXIT_CODE_RUN_ID) {
+        assert.equal((state.canonicalRun as Record<string, unknown>).exitCode, null);
+      }
       if (scenario.profileId === "kaseki_output_review_v2") {
         assert.ok(providerRequest.questions?.recorded_outcome, "v2 adds the recorded outcome assessment");
       }
@@ -132,6 +142,23 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
   const logs = harness.getLogs();
   assert.equal(JSON.stringify(logs).includes(SOYUZ_MACHINE_TOKEN), false, "machine credentials stay out of Worker logs");
   assert.equal(JSON.stringify(logs).includes(TASK_MARKER), false, "raw task prompts stay out of Worker logs");
+});
+
+test("rejects the literal undefined bearer value when the dashboard token is absent", async () => {
+  const response = await soyuzSimulatorWorker.fetch(
+    new Request("https://soyuz.test/dashboard/api/analysis/decisions", {
+      method: "POST",
+      headers: { authorization: "Bearer undefined", "content-type": "application/json" },
+      body: JSON.stringify({ profileId: "run_operations_triage_v1", runId: SOURCE_RUN_ID }),
+    }),
+    {
+      SENKU: { fetch: async () => { throw new Error("unauthorized request reached Senku"); } },
+      SENKU_SOYUZ_API_TOKEN: SOYUZ_MACHINE_TOKEN,
+    },
+  );
+
+  assert.equal(response.status, 401);
+  assert.match(await response.text(), /UNAUTHENTICATED/);
 });
 
 test("keeps Soyuz dashboard and Senku provider failures bounded and private", async () => {
