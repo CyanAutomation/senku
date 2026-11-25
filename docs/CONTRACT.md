@@ -23,7 +23,7 @@ The Worker authenticates `Authorization: Bearer <token>` against two separate se
 | Identity | Secret | Generic decisions | Permitted profiles |
 | --- | --- | --- | --- |
 | Kaseki | `SENKU_KASEKI_API_TOKEN` | Yes | `task_admission_v1`, `kaseki_goal_check_v1`, `kaseki_run_evaluation_v1`, `kaseki_context_routing_v1`, `validation_recovery_v1` |
-| Soyuz | `SENKU_SOYUZ_API_TOKEN` | No | `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2` |
+| Soyuz | `SENKU_SOYUZ_API_TOKEN` | No | `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2`, `run_retry_review_v1` |
 
 Both values must be configured, valid, and different. Each is 32–1,024 printable ASCII characters without whitespace. An absent, malformed, or duplicated credential configuration fails closed for all bearer-authenticated operations; readiness is false. Token comparison uses SHA-256 digests and a fixed-length byte loop. Credentials are never logged or returned.
 

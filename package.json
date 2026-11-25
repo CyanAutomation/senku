@@ -11,7 +11,8 @@
   "scripts": {
     "dev": "wrangler dev",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run && npm run validate:openapi && node --test scripts/wrangler-config.test.mjs scripts/audit-dependencies.test.mjs scripts/scorecard-workflow.test.mjs",
+    "test": "vitest run && npm run validate:openapi && node --test scripts/wrangler-config.test.mjs scripts/audit-dependencies.test.mjs scripts/scorecard-workflow.test.mjs scripts/soyuz-simulator.test.ts",
+    "test:soyuz-simulator": "node --test scripts/soyuz-simulator.test.ts",
     "test:coverage": "vitest run --coverage",
     "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "validate:openapi": "vitest run --config vitest.openapi.config.ts",
