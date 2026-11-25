@@ -98,6 +98,7 @@ Routine tests mock the provider and do not incur provider charges. `npm run buil
 - [UTCP discovery and client usage](docs/UTCP.md)
 - [Phase 2D deployment readiness and status](docs/PHASE-2D-DEPLOYMENT.md)
 - [Phase 2C decisions and measurements](docs/PHASE-2C-DECISIONS.md)
+- [Persistence and retention](docs/PERSISTENCE-RETENTION.md)
 - [Phase 2B decisions](docs/PHASE-2B-DECISIONS.md)
 - [Phase 2A decisions](docs/PHASE-2A-DECISIONS.md)
 - [Agent skills and selection guidance](.github/skills/README.md)
