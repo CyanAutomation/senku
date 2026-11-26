@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../src/providers/openrouter/decisions";
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
@@ -69,6 +69,7 @@ async function expectProviderError(
   }
 }
 
+describe("OpenRouter provider", () => {
   it("sends one fixed-destination authenticated request and normalizes validated answers", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(providerBody()));
     const result = await requestOpenRouterDecision(request, config, fetcher);
@@ -456,3 +457,4 @@ async function expectProviderError(
     };
     await expectProviderError(requestOpenRouterDecision(request, config, async () => jsonResponse(badLegend)), "INVALID_PROVIDER_RESPONSE", false);
   });
+});
