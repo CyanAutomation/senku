@@ -150,6 +150,18 @@ Errors use the established envelope:
 
 Provider errors preserve their retryable classification. No automatic retry is performed.
 
+For a retryable upstream HTTP failure, Senku forwards a valid `Retry-After` value as an HTTP response header when it is no more than 24 hours. Delta-seconds and standard HTTP dates are normalized to seconds; malformed, excessive, and non-retryable hints are omitted. The header is a bounded upstream hint, not a retry authorization. Callers should apply their own attempt limit, jitter, and overall deadline. A timeout can occur after the provider has processed and billed the request, so retrying it can incur a duplicate charge.
+
+| Provider outcome | Senku response | Retryable | Notes |
+| --- | --- | --- | --- |
+| Request timeout, including a stalled response body | `504 PROVIDER_TIMEOUT` | Yes | One provider attempt; records timeout classification and duration. |
+| Network or response-stream failure | `502 PROVIDER_UNAVAILABLE` | Yes | Upstream details are omitted. |
+| Upstream `408`, `425`, `429`, or `5xx` | `502 PROVIDER_UNAVAILABLE` | Yes | A valid `Retry-After` may be forwarded. |
+| Other upstream non-2xx status | `502 PROVIDER_UNAVAILABLE` | No | Status is retained in bounded diagnostics. |
+| Malformed or invalid successful response | `502 INVALID_PROVIDER_RESPONSE` | No | Senku returns no partial assessment. |
+
+Routine tests inject provider scenarios through `createOpenRouterSimulator` in `test/helpers/openrouter-simulator.ts`. It restricts requests to the fixed OpenRouter URL and supports network failures, delayed headers and body chunks, interrupted streams, arbitrary status/headers, and malformed bytes. The Service Binding harness verifies that a failed evaluation does not trigger an internal retry and that a new evaluation succeeds after the simulated provider recovers. These tests make no live provider calls.
+
 ## Provider and deployment behavior
 
 Senku always sends one request to the fixed OpenRouter Decisions API endpoint and uses only `~typesafe/jev-latest`. It returns the resolved model identifier from OpenRouter. Model selection, endpoint, identity, question map, and provider credential are never caller-controlled. The dedicated Senku OpenRouter key should have a provider-side spending limit; its configuration has not been verified here.

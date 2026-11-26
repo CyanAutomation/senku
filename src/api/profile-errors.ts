@@ -3,6 +3,7 @@ import { ProfileEngineError } from "../contracts/profiles";
 import { ProviderError, type ProviderDiagnosticCode } from "../providers/openrouter/config";
 import type { ProviderFetchFailureClass } from "../providers/openrouter/fetch-diagnostics";
 import type { ProviderCauseCode, ProviderErrorType } from "../providers/openrouter/fetch-diagnostics";
+import { isValidRetryAfterSeconds } from "../http/retry-after";
 
 const PROFILE_API_ERROR_CODES: Record<ProfileEngineError["code"], ApiError["code"]> = {
   UNKNOWN_PROFILE: "NOT_FOUND",
@@ -17,7 +18,7 @@ const PROFILE_API_ERROR_CODES: Record<ProfileEngineError["code"], ApiError["code
 
 export function profileApiError(error: unknown): ApiError {
   if (error instanceof ApiError) return error;
-  if (error instanceof ProviderError) return new ApiError(error.code, error.retryable);
+  if (error instanceof ProviderError) return new ApiError(error.code, error.retryable, undefined, error.retryAfterSeconds);
   if (error instanceof ProfileEngineError) return new ApiError(PROFILE_API_ERROR_CODES[error.code]);
   return new ApiError("INTERNAL_ERROR");
 }
@@ -35,11 +36,13 @@ export interface ProfileProviderDiagnostics {
   providerErrorType?: ProviderErrorType;
   providerCauseDepth?: number;
   providerCauseCode?: ProviderCauseCode;
+  providerRetryAfterSeconds?: number;
 }
 
 /** Returns only bounded, allowlisted fields suitable for operational logs. */
 export function profileProviderDiagnostics(error: unknown): ProfileProviderDiagnostics {
   if (error instanceof ProviderError) {
+    const retryAfterSeconds = error.retryAfterSeconds;
     return {
       ...(error.diagnosticCode ? { providerDiagnosticCode: error.diagnosticCode } : {}),
       ...(error.upstreamStatus !== undefined ? { providerHttpStatus: error.upstreamStatus } : {}),
@@ -49,6 +52,7 @@ export function profileProviderDiagnostics(error: unknown): ProfileProviderDiagn
       ...(error.providerErrorType ? { providerErrorType: error.providerErrorType } : {}),
       ...(error.providerCauseDepth !== undefined ? { providerCauseDepth: error.providerCauseDepth } : {}),
       ...(error.providerCauseCode ? { providerCauseCode: error.providerCauseCode } : {}),
+      ...(error.retryable && isValidRetryAfterSeconds(retryAfterSeconds) ? { providerRetryAfterSeconds: retryAfterSeconds } : {}),
     };
   }
   if (error instanceof ProfileEngineError && error.code === "INVALID_PROFILE_OUTPUT") {

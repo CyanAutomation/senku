@@ -143,6 +143,7 @@ function logFailure(
     providerErrorType?: ProviderErrorType;
     providerCauseDepth?: number;
     providerCauseCode?: ProviderCauseCode;
+    providerRetryAfterSeconds?: number;
     event?: string;
   },
 ): void {
@@ -164,6 +165,7 @@ function logFailure(
     providerErrorType: details.providerErrorType,
     providerCauseDepth: details.providerCauseDepth,
     providerCauseCode: details.providerCauseCode,
+    providerRetryAfterSeconds: details.providerRetryAfterSeconds,
     workerDurationMs: details.workerDurationMs,
     attemptCount: details.attemptCount ?? 0,
     profileId: details.profileId,

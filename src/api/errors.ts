@@ -1,4 +1,5 @@
 import type { ErrorCode, ErrorResponse } from "../contracts/decisions";
+import { isValidRetryAfterSeconds } from "../http/retry-after";
 
 const messages: Record<ErrorCode, string> = {
   INVALID_REQUEST: "The request is not valid for schema version 1.",
@@ -33,6 +34,7 @@ export class ApiError extends Error {
     readonly code: ErrorCode,
     readonly retryable = false,
     readonly status = statusCodes[code],
+    readonly retryAfterSeconds?: number,
   ) {
     super(messages[code]);
     this.name = "ApiError";
@@ -40,6 +42,10 @@ export class ApiError extends Error {
 }
 
 export function errorResponse(error: ApiError, requestId: string): Response {
+  const retryAfterHint = error.retryAfterSeconds;
+  const retryAfterSeconds = error.retryable && isValidRetryAfterSeconds(retryAfterHint)
+    ? retryAfterHint
+    : undefined;
   const body: ErrorResponse = {
     error: {
       code: error.code,
@@ -53,6 +59,7 @@ export function errorResponse(error: ApiError, requestId: string): Response {
     headers: {
       "content-type": "application/json; charset=utf-8",
       "cache-control": "no-store",
+      ...(retryAfterSeconds === undefined ? {} : { "retry-after": String(retryAfterSeconds) }),
     },
   });
 }

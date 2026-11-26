@@ -2,6 +2,7 @@ import { expect, it, vi } from "vitest";
 import { createWorker } from "../src/index";
 import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { makeTestEnvironment } from "./helpers/environment";
+import { createOpenRouterSimulator } from "./helpers/openrouter-simulator";
 import { providerResponse } from "./helpers/provider-response";
 
 const env = makeTestEnvironment("profile-route");
@@ -305,6 +306,93 @@ const scenarios = [
     expect(failureLogs.at(-1)?.providerHttpStatus).toBeUndefined();
     expect(JSON.stringify(failureLogs)).not.toContain(privateCause);
     expect(JSON.stringify(failureLogs)).not.toContain("ECONNREFUSED");
+  });
+
+  it("returns a safe timeout and bounded diagnostics when the response body stalls", async () => {
+    const timeoutLogs: Array<Record<string, unknown>> = [];
+    const simulator = createOpenRouterSimulator([{
+      kind: "response",
+      bodyChunks: ["{"],
+      chunkDelayMs: 2_000,
+    }]);
+    const response = await createWorker({
+      fetchImpl: simulator.fetch,
+      logger: (record) => timeoutLogs.push(record as Record<string, unknown>),
+    }).fetch(request("/v1/profiles/validation_recovery_v1/evaluate", {
+      method: "POST", token: KASEKI_TOKEN,
+      body: { schemaVersion: "1", input: { command: "npm test", exitCode: 1, output: "safe" } }, contentType: "application/json",
+    }), { ...env, SENKU_PROVIDER_TIMEOUT_MS: "1000" });
+
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_TIMEOUT", retryable: true } });
+    expect(simulator.callCount).toBe(1);
+    expect(timeoutLogs.at(-1)).toMatchObject({
+      event: "profile.evaluation_failed",
+      errorCode: "PROVIDER_TIMEOUT",
+      providerHttpStatus: 200,
+      providerFetchFailureClass: "timeout",
+      providerRetryable: true,
+      attemptCount: 1,
+      providerDurationMs: expect.any(Number),
+    });
+    expect(JSON.stringify(timeoutLogs)).not.toContain("simulated_response_stream_reset");
+    expect(JSON.stringify(timeoutLogs)).not.toContain("test-openrouter-key");
+  });
+
+  it("forwards only a valid bounded Retry-After hint for retryable provider failures", async () => {
+    const makeInput = () => request("/v1/profiles/validation_recovery_v1/evaluate", {
+      method: "POST", token: KASEKI_TOKEN,
+      body: { schemaVersion: "1", input: { command: "npm test", exitCode: 1, output: "safe" } }, contentType: "application/json",
+    });
+    const retryAfterLogs: Array<Record<string, unknown>> = [];
+    const rateLimited = await createWorker({
+      fetchImpl: createOpenRouterSimulator([{
+        kind: "response", status: 429, headers: { "retry-after": "7" }, body: "private upstream detail",
+      }]).fetch,
+      logger: (record) => retryAfterLogs.push(record as Record<string, unknown>),
+    }).fetch(makeInput(), env);
+    expect(rateLimited.status).toBe(502);
+    expect(rateLimited.headers.get("retry-after")).toBe("7");
+    expect(await rateLimited.json()).toMatchObject({ error: { code: "PROVIDER_UNAVAILABLE", retryable: true } });
+    expect(retryAfterLogs.at(-1)).toMatchObject({ providerRetryAfterSeconds: 7, providerHttpStatus: 429 });
+
+    const dateHint = new Date(Date.now() + 5_000).toUTCString();
+    const dateRateLimit = await createWorker({
+      fetchImpl: createOpenRouterSimulator([{
+        kind: "response", status: 429, headers: { "retry-after": dateHint }, body: "private upstream detail",
+      }]).fetch,
+      logger: () => undefined,
+    }).fetch(makeInput(), env);
+    const dateDelay = Number(dateRateLimit.headers.get("retry-after"));
+    expect(dateRateLimit.status).toBe(502);
+    expect(Number.isInteger(dateDelay) && dateDelay >= 0 && dateDelay <= 5).toBe(true);
+
+    const permanentFailure = await createWorker({
+      fetchImpl: createOpenRouterSimulator([{
+        kind: "response", status: 402, headers: { "retry-after": "7" }, body: "private upstream detail",
+      }]).fetch,
+      logger: () => undefined,
+    }).fetch(makeInput(), env);
+    expect(permanentFailure.status).toBe(502);
+    expect(permanentFailure.headers.has("retry-after")).toBe(false);
+
+    const malformedHint = await createWorker({
+      fetchImpl: createOpenRouterSimulator([{
+        kind: "response", status: 503, headers: { "retry-after": "-7" }, body: "private upstream detail",
+      }]).fetch,
+      logger: () => undefined,
+    }).fetch(makeInput(), env);
+    expect(malformedHint.status).toBe(502);
+    expect(malformedHint.headers.has("retry-after")).toBe(false);
+
+    const excessiveHint = await createWorker({
+      fetchImpl: createOpenRouterSimulator([{
+        kind: "response", status: 503, headers: { "retry-after": "86401" }, body: "private upstream detail",
+      }]).fetch,
+      logger: () => undefined,
+    }).fetch(makeInput(), env);
+    expect(excessiveHint.status).toBe(502);
+    expect(excessiveHint.headers.has("retry-after")).toBe(false);
   });
 
   it("keeps caller evidence out of provider-visible logs", async () => {
