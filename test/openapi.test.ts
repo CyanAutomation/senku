@@ -53,6 +53,9 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
       const profileEvaluation = (paths["/v1/profiles/{profileId}/evaluate"] as { post: { responses: Record<string, unknown> } }).post;
       expect(profileEvaluation.responses).toHaveProperty("405");
       expect(profileEvaluation.responses).toHaveProperty("415");
+      expect(profileEvaluation.responses["502"]).toMatchObject({
+        headers: { "Retry-After": { schema: { type: "integer", minimum: 0, maximum: 86_400 } } },
+      });
       expect((paths["/healthz"] as { get: { responses: Record<string, unknown> } }).get.responses).toHaveProperty("405");
       expect(paths).not.toHaveProperty("/v1/decisions");
       const schemas = (document.components as { schemas: Record<string, unknown> }).schemas;

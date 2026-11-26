@@ -37,7 +37,7 @@ npm run build
 
 The routine test suite uses mocked provider responses and does not incur provider charges. The performance benchmarks are excluded from `npm test` and run through `npm run perf:smoke`. `npm run validate:openapi` independently checks both permission-filtered OpenAPI 3.1 documents with Redocly; `npm test` runs it automatically after the Worker tests. `npm run perf:smoke` benchmarks discovery, OpenAPI serialization, all nine profile contracts, five representative maximum-input evaluation paths, and one official UTCP invocation per identity with mocked provider responses. It reports generated sizes, request/evidence sizes, provider attempts, and local elapsed wall time. Timings are informational only: there are no latency thresholds, and local workerd time is not a measurement of billed Cloudflare CPU. The benchmark command selects only the two UTCP invocation cases; the remaining UTCP contract tests run once in `npm test`. The scheduled or manually started `Performance smoke` workflow saves its log as a 14-day artifact. `npm run build` performs Wrangler's dry-run build, does not deploy, and emits the bundle whose size is recorded in [PHASE-2C-DECISIONS.md](PHASE-2C-DECISIONS.md).
 
-`npm run test:soyuz-simulator` runs the Senku-side Service Binding integration harness. It uses the real Senku Worker, a test-only Soyuz dashboard/client simulator, sanitized retained-run fixtures, and a mocked provider. It does not require a Cloudflare account or real credentials. See [SOYUZ-INTEGRATION-TESTING.md](SOYUZ-INTEGRATION-TESTING.md) for the simulator boundary and the command for Soyuz's full cross-worker test.
+`npm run test:soyuz-simulator` runs the Senku-side Service Binding integration harness. It uses the real Senku Worker, a test-only Soyuz dashboard/client simulator, sanitized retained-run fixtures, and a scenario-driven OpenRouter fetch simulator. It does not require a Cloudflare account or real credentials. The harness checks one-attempt failure behavior and succeeds on a later evaluation after a simulated 503; it also blocks non-OpenRouter outbound requests. Unit tests cover delayed headers and a stalled response body. See [SOYUZ-INTEGRATION-TESTING.md](SOYUZ-INTEGRATION-TESTING.md) for the simulator boundary and the command for Soyuz's full cross-worker test.
 
 `npm run validate:skills` checks `.github/skills` frontmatter, skill-directory names, index coverage, and local Markdown links. CI runs this check as part of `verify`.
 
@@ -80,7 +80,9 @@ npx wrangler secret put SENKU_SOYUZ_API_TOKEN
 
 These commands prompt for each value and deploy a new Worker version. Keep the three secret values out of GitHub Actions logs, Wrangler `vars`, and source control. Routine validation uses `npm run build` and does not deploy.
 
-The model alias remains `~typesafe/jev-latest`; Senku returns the resolved provider model identifier. There is one provider request per evaluation, no retry, no fallback, no per-profile model, and one allowed provider subrequest.
+The model alias remains `~typesafe/jev-latest`; Senku returns the resolved provider model identifier. There is one provider request per evaluation, no retry, no fallback, no per-profile model, and one allowed provider subrequest. A retryable upstream HTTP failure can include a normalized `Retry-After` response header for callers; Senku never retries internally. See [CONTRACT.md](CONTRACT.md#bounds-and-errors) for the bounds and caller retry guidance.
+
+Failed evaluations emit bounded operational fields including provider status, retryability, fetch-failure class, provider and Worker durations, attempt count, and a normalized retry delay when present. These records use the configured 10% log sampling rate, so sampled log counts are useful for diagnosis but are not complete incident totals.
 
 ## Example requests
 

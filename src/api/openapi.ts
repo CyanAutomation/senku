@@ -3,6 +3,7 @@ import type { AnyDecisionProfile, JsonSchema } from "../contracts/profiles";
 import type { ClientIdentity } from "../auth/permissions";
 import { profileRegistry } from "../decisions/profile-registry";
 import { utcpManualResponseSchema } from "./utcp";
+import { MAX_RETRY_AFTER_SECONDS } from "../http/retry-after";
 import {
   listPublicProfiles,
   profileAnswersSchema,
@@ -40,7 +41,18 @@ function commonErrors(statuses: readonly number[]): Record<string, unknown> {
     503: "The service is not configured.",
     504: "The provider did not respond before the configured timeout.",
   };
-  return Object.fromEntries(statuses.map((status) => [String(status), response(ref("ErrorResponse"), descriptions[status])]));
+  return Object.fromEntries(statuses.map((status) => {
+    const errorResponse = response(ref("ErrorResponse"), descriptions[status]);
+    if (status === 502) {
+      errorResponse.headers = {
+        "Retry-After": {
+          description: "Optional bounded upstream delay in seconds for a retryable provider failure. Senku does not retry automatically.",
+          schema: { type: "integer", minimum: 0, maximum: MAX_RETRY_AFTER_SECONDS },
+        },
+      };
+    }
+    return [String(status), errorResponse];
+  }));
 }
 
 function profileMetadataProperties(id: JsonSchema = { type: "string" }): Record<string, JsonSchema> {

@@ -43,4 +43,15 @@ describe("profile error mapping", () => {
     expect(profileProviderDiagnosticCode(new Error("unexpected"))).toBeUndefined();
     expect(profileProviderDiagnostics(new Error("private details"))).toEqual({});
   });
+
+  it("keeps provider retry-delay diagnostics within the public bound", () => {
+    const valid = new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_http_error", 429, 17, undefined, undefined, undefined, undefined, 7);
+    expect(profileProviderDiagnostics(valid).providerRetryAfterSeconds).toBe(7);
+
+    const excessive = new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_http_error", 429, 17, undefined, undefined, undefined, undefined, 86_401);
+    expect(profileProviderDiagnostics(excessive)).not.toHaveProperty("providerRetryAfterSeconds");
+
+    const permanent = new ProviderError("PROVIDER_UNAVAILABLE", false, "provider_http_error", 402, 17, undefined, undefined, undefined, undefined, 7);
+    expect(profileProviderDiagnostics(permanent)).not.toHaveProperty("providerRetryAfterSeconds");
+  });
 });

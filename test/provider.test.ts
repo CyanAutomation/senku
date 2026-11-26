@@ -3,6 +3,7 @@ import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { DEFAULT_JEV_MODEL, ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../src/providers/openrouter/decisions";
 import { runOperationsTriageProfile } from "../src/profiles/soyuz/run-operations-triage";
 import { kasekiRequest } from "./fixtures/kaseki-request";
+import { createOpenRouterSimulator } from "./helpers/openrouter-simulator";
 
 // Contract: docs/PHASE-1-DECISIONS.md, provider response normalization and metadata policy.
 // This suite covers the full request adapter; helper normalization and diagnostic codes live in provider-response.test.ts.
@@ -95,9 +96,9 @@ async function expectProviderError(
   });
 
   it("classifies fetch rejections without retaining raw causes or response status", async () => {
-    const failure = new Error("private network detail", { cause: { code: "ECONNREFUSED" } });
+    const simulator = createOpenRouterSimulator([{ kind: "network-error", message: "private network detail", causeCode: "ECONNREFUSED" }]);
     try {
-      await requestOpenRouterDecision(request, config, async () => { throw failure; });
+      await requestOpenRouterDecision(request, config, simulator.fetch);
       throw new Error("Expected provider request to fail.");
     } catch (error) {
       expect(error).toBeInstanceOf(ProviderError);
@@ -110,6 +111,14 @@ async function expectProviderError(
       expect((error as ProviderError).upstreamStatus).toBeUndefined();
       expect(JSON.stringify(error)).not.toContain("private network detail");
     }
+    expect(simulator.callCount).toBe(1);
+  });
+
+  it("blocks unexpected outbound URLs in the reusable provider simulator", async () => {
+    const simulator = createOpenRouterSimulator();
+    await expect(simulator.fetch("https://example.test/api", { method: "POST", body: "{}" }))
+      .rejects.toThrow("simulator_blocked_unexpected_outbound_request");
+    expect(simulator.callCount).toBe(0);
   });
 
   it("distinguishes serialization failure from a fetch failure", async () => {
@@ -240,13 +249,13 @@ async function expectProviderError(
   });
 
   it("normalizes stream-read failures without leaking provider details or making retries", async () => {
-    const fetcher = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
-      start(controller) {
-        controller.error(new Error("private upstream stream detail"));
-      },
-    }), { headers: { "content-type": "application/json" } }));
-    await expectProviderError(requestOpenRouterDecision(request, config, fetcher), "PROVIDER_UNAVAILABLE", true, "response_body_read_failed");
-    expect(fetcher).toHaveBeenCalledTimes(1);
+    const simulator = createOpenRouterSimulator([{
+      kind: "response",
+      bodyChunks: ["{"],
+      failAfterChunks: 1,
+    }]);
+    await expectProviderError(requestOpenRouterDecision(request, config, simulator.fetch), "PROVIDER_UNAVAILABLE", true, "response_body_read_failed");
+    expect(simulator.callCount).toBe(1);
   });
 
   it("constrains configuration to the exact selected model alias", () => {
@@ -268,15 +277,23 @@ async function expectProviderError(
   });
 
   it("rejects non-2xx responses with safe status diagnostics and without returning the upstream body", async () => {
-    for (const [status, retryable] of [[402, false], [429, true], [503, true]] as const) {
+    const failures = [[400, false], [401, false], [402, false], [408, true], [425, true], [429, true], [500, true], [503, true], [504, true]] as const;
+    const simulator = createOpenRouterSimulator(failures.map(([status]) => ({
+      kind: "response" as const,
+      status,
+      body: "secret upstream diagnostic",
+    })));
+    for (const [status, retryable] of failures) {
       await expectProviderError(
-        requestOpenRouterDecision(request, config, async () => new Response("secret upstream diagnostic", { status })),
+        requestOpenRouterDecision(request, config, simulator.fetch),
         "PROVIDER_UNAVAILABLE",
         retryable,
         "provider_http_error",
         status,
       );
     }
+    expect(simulator.callCount).toBe(failures.length);
+    expect(simulator.pendingScenarioCount).toBe(0);
   });
 
   it("classifies network failures and timeouts as retryable with safe diagnostics and without retrying", async () => {
@@ -296,6 +313,38 @@ async function expectProviderError(
       "PROVIDER_TIMEOUT",
       true,
     );
+  });
+
+  it("classifies a response body stall as a provider timeout", async () => {
+    const quickTimeoutConfig = { ...config, timeoutMs: 20 };
+    const simulator = createOpenRouterSimulator([{
+      kind: "response",
+      body: JSON.stringify(providerBody()),
+      chunkDelayMs: 100,
+    }]);
+
+    await expectProviderError(
+      requestOpenRouterDecision(request, quickTimeoutConfig, simulator.fetch),
+      "PROVIDER_TIMEOUT",
+      true,
+    );
+    expect(simulator.callCount).toBe(1);
+  });
+
+  it("classifies a delayed response header as a provider timeout", async () => {
+    const quickTimeoutConfig = { ...config, timeoutMs: 20 };
+    const simulator = createOpenRouterSimulator([{
+      kind: "response",
+      headersDelayMs: 100,
+      body: JSON.stringify(providerBody()),
+    }]);
+
+    await expectProviderError(
+      requestOpenRouterDecision(request, quickTimeoutConfig, simulator.fetch),
+      "PROVIDER_TIMEOUT",
+      true,
+    );
+    expect(simulator.callCount).toBe(1);
   });
 
   it("classifies unexpected response-processing failures separately from provider failures", async () => {
@@ -319,6 +368,16 @@ async function expectProviderError(
     await expectProviderError(requestOpenRouterDecision(request, config, async () => new Response("{", {
       headers: { "content-type": "application/json" },
     })), "INVALID_PROVIDER_RESPONSE", false, "response_body_invalid_json");
+    const invalidUtf8 = createOpenRouterSimulator([{
+      kind: "response",
+      bodyChunks: [new Uint8Array([0xc3, 0x28])],
+    }]);
+    await expectProviderError(
+      requestOpenRouterDecision(request, config, invalidUtf8.fetch),
+      "INVALID_PROVIDER_RESPONSE",
+      false,
+      "response_body_invalid_json",
+    );
 
     const largeResponse = new Response(new ReadableStream<Uint8Array>({
       start(controller) {

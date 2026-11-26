@@ -5,6 +5,7 @@ import {
 import { ProviderError, type ProviderConfig } from "./config";
 import { classifyProviderFetchFailure, providerErrorFingerprint } from "./fetch-diagnostics";
 import { readBoundedResponse, validateProviderPayload } from "./response";
+import { parseRetryAfterSeconds } from "../../http/retry-after";
 
 const OPENROUTER_DECISIONS_URL = "https://openrouter.ai/api/alpha/decisions";
 
@@ -64,7 +65,8 @@ export async function requestOpenRouterDecision(
       await response.body?.cancel().catch(() => undefined);
       const retryable = response.status === 408 || response.status === 425
         || response.status === 429 || response.status >= 500;
-      throw new ProviderError("PROVIDER_UNAVAILABLE", retryable, "provider_http_error", response.status);
+      const retryAfterSeconds = retryable ? parseRetryAfterSeconds(response.headers.get("retry-after")) : undefined;
+      throw new ProviderError("PROVIDER_UNAVAILABLE", retryable, "provider_http_error", response.status, undefined, undefined, undefined, undefined, undefined, retryAfterSeconds);
     }
     const contentType = response.headers.get("content-type");
     if (contentType && !/^\s*application\/(?:[a-z0-9.+-]+\+)?json(?:\s*;|$)/i.test(contentType)) {
@@ -80,6 +82,9 @@ export async function requestOpenRouterDecision(
       throw error;
     }
   } catch (error) {
+    if (controller.signal.aborted) {
+      throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs(), "timeout");
+    }
     if (error instanceof ProviderError) {
       throw new ProviderError(
         error.code,
@@ -91,10 +96,8 @@ export async function requestOpenRouterDecision(
         error.providerErrorType,
         error.providerCauseDepth,
         error.providerCauseCode,
+        error.retryAfterSeconds,
       );
-    }
-    if (controller.signal.aborted) {
-      throw new ProviderError("PROVIDER_TIMEOUT", true, undefined, upstreamStatus, providerDurationMs(), "timeout");
     }
     const diagnosticCode = upstreamStatus === undefined ? "provider_unexpected_error" : "response_processing_failed";
     throw new ProviderError("PROVIDER_UNAVAILABLE", true, diagnosticCode, upstreamStatus, providerDurationMs());

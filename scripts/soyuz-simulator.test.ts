@@ -3,6 +3,7 @@ import { after, before, test } from "node:test";
 import { createTestHarness } from "wrangler";
 import type { DecisionRequest } from "../src/contracts/decisions.ts";
 import { providerResponse } from "../test/helpers/provider-response.ts";
+import { createOpenRouterSimulator, type OpenRouterScenario } from "../test/helpers/openrouter-simulator.ts";
 import soyuzSimulatorWorker from "../test/soyuz-simulator/worker.ts";
 
 const SOYUZ_USER_TOKEN = "soyuz-simulator-user-token-0000000000000000";
@@ -10,10 +11,15 @@ const SOYUZ_MACHINE_TOKEN = "soyuz-simulator-machine-token-0000000000000000";
 const KASEKI_MACHINE_TOKEN = "kaseki-simulator-machine-token-0000000000000000";
 const OPENROUTER_KEY = "synthetic-openrouter-key-not-a-real-secret";
 const TASK_MARKER = "SYNTHETIC_SOYUZ_TASK_PROMPT_MUST_STAY_IN_SOYUZ";
-const OPENROUTER_URL = "https://openrouter.ai/api/alpha/decisions";
 const SOURCE_RUN_ID = "11111111-1111-4111-8111-111111111111";
 const RETRY_RUN_ID = "22222222-2222-4222-8222-222222222222";
 const INVALID_EXIT_CODE_RUN_ID = "44444444-4444-4444-8444-444444444444";
+
+interface SimulatedProviderRequest {
+  model: string;
+  state: unknown;
+  questions?: DecisionRequest["questions"];
+}
 
 const scenarios = [
   { profileId: "run_operations_triage_v1", runId: SOURCE_RUN_ID, answers: ["needs_followup", "likely_area", "severity"] },
@@ -45,24 +51,22 @@ const harness = createTestHarness({
   ],
 });
 
-const providerRequests: DecisionRequest[] = [];
-let providerCalls = 0;
-let providerStatus: number | undefined;
+const openRouter = createOpenRouterSimulator();
 let originalFetch: typeof fetch;
+
+function successfulProviderScenario(): OpenRouterScenario {
+  return {
+    kind: "response",
+    body: async (requestBody) => {
+      const response = providerResponse(requestBody as DecisionRequest, { usage: { input_tokens: 10, output_tokens: 5 } });
+      return response.text();
+    },
+  };
+}
 
 before(async () => {
   originalFetch = globalThis.fetch;
-  globalThis.fetch = async (input, init) => {
-    const request = input instanceof Request ? input : new Request(input, init);
-    if (request.url !== OPENROUTER_URL) {
-      throw new Error("The Soyuz simulator test blocks every external request except the mocked OpenRouter call.");
-    }
-    providerCalls += 1;
-    if (providerStatus !== undefined) return new Response("synthetic private provider detail", { status: providerStatus });
-    const body = await request.clone().json() as DecisionRequest;
-    providerRequests.push(body);
-    return providerResponse(body, { usage: { input_tokens: 10, output_tokens: 5 } });
-  };
+  globalThis.fetch = openRouter.fetch;
   await harness.listen();
 });
 
@@ -86,9 +90,7 @@ function dashboardRequest(profileId: string, runId: string, userToken = SOYUZ_US
 }
 
 test("simulates Soyuz dashboard decisions over a real Senku Worker Service Binding", async () => {
-  providerRequests.length = 0;
-  providerCalls = 0;
-  providerStatus = undefined;
+  openRouter.reset(...scenarios.map(() => successfulProviderScenario()));
   const soyuz = harness.getWorker("soyuz-simulator");
 
   for (const [index, scenario] of scenarios.entries()) {
@@ -100,7 +102,7 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
     assert.equal(body.data?.model, "typesafe/jev-1.14-20261014");
     assert.deepEqual(Object.keys(body.data?.answers ?? {}).sort(), [...scenario.answers].sort());
 
-    const providerRequest = providerRequests[index];
+    const providerRequest = openRouter.requests[index]?.body as SimulatedProviderRequest | undefined;
     assert.ok(providerRequest, `expected a provider call for ${scenario.profileId}`);
     assert.equal(providerRequest.model, "~typesafe/jev-latest");
     assert.equal(JSON.stringify(providerRequest).includes(TASK_MARKER), false, "raw task prompts stay inside Soyuz");
@@ -138,13 +140,15 @@ test("simulates Soyuz dashboard decisions over a real Senku Worker Service Bindi
     }
   }
 
-  assert.equal(providerCalls, scenarios.length, "each profile evaluation makes exactly one provider attempt");
+  assert.equal(openRouter.callCount, scenarios.length, "each profile evaluation makes exactly one provider attempt");
+  assert.equal(openRouter.pendingScenarioCount, 0);
   const logs = harness.getLogs();
   assert.equal(JSON.stringify(logs).includes(SOYUZ_MACHINE_TOKEN), false, "machine credentials stay out of Worker logs");
   assert.equal(JSON.stringify(logs).includes(TASK_MARKER), false, "raw task prompts stay out of Worker logs");
 });
 
 test("rejects the literal undefined bearer value when the dashboard token is absent", async () => {
+  openRouter.reset();
   const response = await soyuzSimulatorWorker.fetch(
     new Request("https://soyuz.test/dashboard/api/analysis/decisions", {
       method: "POST",
@@ -162,9 +166,11 @@ test("rejects the literal undefined bearer value when the dashboard token is abs
 });
 
 test("keeps Soyuz dashboard and Senku provider failures bounded and private", async () => {
-  providerRequests.length = 0;
-  providerCalls = 0;
-  providerStatus = 503;
+  openRouter.reset({
+    kind: "response",
+    status: 503,
+    body: "synthetic private provider detail",
+  });
   const soyuz = harness.getWorker("soyuz-simulator");
   const input = dashboardRequest("run_operations_triage_v1", SOURCE_RUN_ID);
   const response = await soyuz.fetch(input.url, input.init);
@@ -174,14 +180,21 @@ test("keeps Soyuz dashboard and Senku provider failures bounded and private", as
   assert.match(body, /JEV_PROVIDER_UNAVAILABLE/);
   assert.equal(body.includes("synthetic private provider detail"), false);
   assert.equal(body.includes(SOYUZ_MACHINE_TOKEN), false);
-  assert.equal(providerCalls, 1, "a failed provider response still consumes one provider attempt");
-  providerStatus = undefined;
+  assert.equal(openRouter.callCount, 1, "a failed provider response still consumes one provider attempt");
+  assert.equal(openRouter.pendingScenarioCount, 0);
+  assert.equal(JSON.stringify(harness.getLogs()).includes("synthetic private provider detail"), false);
+
+  openRouter.enqueue(successfulProviderScenario());
+  const recovered = await soyuz.fetch(input.url, input.init);
+  const recoveredBody = await recovered.json() as { data?: { answers?: Record<string, unknown> } };
+  assert.equal(recovered.status, 200, "a new evaluation succeeds after the provider recovers");
+  assert.ok(recoveredBody.data?.answers);
+  assert.equal(openRouter.callCount, 2, "recovery is a caller initiated request, not a hidden provider retry");
+  assert.equal(openRouter.pendingScenarioCount, 0);
 });
 
 test("rejects unauthorized and unsupported Soyuz dashboard requests before inference", async () => {
-  providerRequests.length = 0;
-  providerCalls = 0;
-  providerStatus = undefined;
+  openRouter.reset();
   const soyuz = harness.getWorker("soyuz-simulator");
 
   const unauthorizedRequest = dashboardRequest("run_operations_triage_v1", SOURCE_RUN_ID, "wrong-user-token");
@@ -195,5 +208,5 @@ test("rejects unauthorized and unsupported Soyuz dashboard requests before infer
   const missingRunRequest = dashboardRequest("run_operations_triage_v1", "33333333-3333-4333-8333-333333333333");
   const missingRun = await soyuz.fetch(missingRunRequest.url, missingRunRequest.init);
   assert.equal(missingRun.status, 404);
-  assert.equal(providerCalls, 0);
+  assert.equal(openRouter.callCount, 0);
 });
