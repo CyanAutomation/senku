@@ -6,6 +6,8 @@ Senku exposes a versioned REST API. All JSON responses use `Cache-Control: no-st
 
 | Method | Path | Authentication and behavior |
 | --- | --- | --- |
+| `GET` | `/docs/` | Public self-contained HTML guide; accepts a token in the page to load the matching permission-filtered OpenAPI document. |
+| `GET` | `/docs` | Public 308 redirect to `/docs/`. |
 | `POST` | `/v1/profiles/{profileId}/evaluate` | Bearer authenticated. Checks profile permission before reading evidence or calling JEV. |
 | `GET` | `/v1/profiles` | Bearer authenticated. Lists only profiles the identity may invoke. |
 | `GET` | `/v1/profiles/{profileId}` | Bearer authenticated. Returns the permitted profile's input and output JSON Schemas and limits. A known but forbidden profile returns 403 without its details. |
@@ -107,6 +109,8 @@ The list is filtered by the central permission policy. `questionCount` is the fi
 `GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
 
 `GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes, including `/utcp`. The authenticated document includes only the profile contracts and UTCP tools available to that identity. Neither identity receives a generic caller-defined question endpoint. Structural, route, reference, permission, schema/runtime parity, and independent Redocly OpenAPI validation run offline.
+
+`GET /docs/` is an unauthenticated HTML shell. It does not embed profile data; a developer enters a machine token and the page requests `/openapi.json` from the same origin with that bearer credential. The token is cleared from the form after submission, is not added to the URL, and is not written to browser storage. The page uses a small built-in renderer, nonce-based Content Security Policy, and same-origin fetch. It has no external scripts, stylesheets, or documentation library. `/docs` redirects to `/docs/`.
 
 ## Retired generic decisions endpoint
 

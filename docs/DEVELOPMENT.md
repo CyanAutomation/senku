@@ -41,7 +41,9 @@ The routine test suite uses mocked provider responses and does not incur provide
 
 `npm run validate:skills` checks `.github/skills` frontmatter, skill-directory names, index coverage, and local Markdown links. CI runs this check as part of `verify`.
 
-The generated OpenAPI document is available at `/openapi.json` when a Worker is running. That route requires one of the configured machine credentials and shows only the authenticated identity's profiles.
+The HTML API guide is available at `/docs/` when a Worker is running. Enter a configured machine token to browse and download the matching permission-filtered OpenAPI document. The page uses only same-origin requests and does not save the token. `/docs` redirects to `/docs/`.
+
+The generated OpenAPI document is also available directly at `/openapi.json`; that route requires a machine credential and shows only the authenticated identity's profiles. See [Example requests](#example-requests) below for script usage.
 
 The UTCP manual is available at `/utcp` and uses the same identity filter. Configure `SENKU_PUBLIC_BASE_URL` to the trusted public origin advertised by the manual. The local example uses `http://127.0.0.1:8787`; production requires HTTPS. The Worker does not infer this value from request Host headers. See [UTCP.md](UTCP.md) for the official client example and complete envelope mapping.
 

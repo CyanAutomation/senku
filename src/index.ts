@@ -1,6 +1,7 @@
 import { areMachineTokenCredentialsDistinct, authenticateBearer, type AuthenticationResult } from "./auth/bearer";
 import { canEvaluateProfile, type ClientIdentity } from "./auth/permissions";
 import { ApiError, errorResponse } from "./api/errors";
+import { apiDocsRedirectResponse, apiDocsResponse } from "./api/docs";
 import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
 import { profileApiError, profileProviderDiagnostics } from "./api/profile-errors";
@@ -480,6 +481,10 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
       const id = requestId();
       const context: RequestContext = { ...runtime, request, env, id, started };
       const path = new URL(request.url).pathname;
+      if (path === "/docs" || path === "/docs/") {
+        if (request.method !== "GET") return methodNotAllowed(id, "GET");
+        return path === "/docs" ? apiDocsRedirectResponse() : apiDocsResponse();
+      }
       const healthResponse = healthRouteResponse(path, request, env, id);
       if (healthResponse) return healthResponse;
 

@@ -22,6 +22,10 @@ function response(schema: JsonSchema, description: string): Record<string, unkno
   return { description, content: { "application/json": { schema } } };
 }
 
+function htmlResponse(description: string): Record<string, unknown> {
+  return { description, content: { "text/html": { schema: { type: "string" } } } };
+}
+
 function commonErrors(statuses: readonly number[]): Record<string, unknown> {
   const descriptions: Record<number, string> = {
     400: "The request body, schema version, or profile input is invalid.",
@@ -123,6 +127,32 @@ function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown
   const profileResponseRefs = profiles.map((profile) => ref(evaluationResponseName(profile.id)));
   const profileRequestRefs = profiles.map((profile) => ref(evaluationRequestName(profile.id)));
   const paths: Record<string, unknown> = {
+    "/docs/": {
+      get: {
+        operationId: "getApiDocumentation",
+        summary: "Browse the Senku API documentation",
+        description: "Returns a self-contained HTML page. Enter a machine bearer token to load the identity-filtered OpenAPI document.",
+        security: [],
+        responses: {
+          "200": htmlResponse("Self-contained API documentation page."),
+          ...commonErrors([405]),
+        },
+      },
+    },
+    "/docs": {
+      get: {
+        operationId: "redirectToApiDocumentation",
+        summary: "Redirect to the Senku API documentation",
+        security: [],
+        responses: {
+          "308": {
+            description: "Permanent redirect to /docs/.",
+            headers: { Location: { description: "Documentation page path.", schema: { type: "string", const: "/docs/" } } },
+          },
+          ...commonErrors([405]),
+        },
+      },
+    },
     "/v1/profiles": {
       get: {
         operationId: "listPermittedProfiles", summary: "List permitted decision profiles", security: [{ BearerAuth: [] }],
@@ -191,6 +221,7 @@ function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown
     openapi: "3.1.0",
     info: { title: "Senku Decision API", version: "1", description: "Authenticated, versioned JEV decision API. The document is filtered to the caller's profile permissions." },
     jsonSchemaDialect: "https://json-schema.org/draft/2020-12/schema",
+    servers: [{ url: "/", description: "The current Senku origin." }],
     security: [{ BearerAuth: [] }],
     paths,
     components,
