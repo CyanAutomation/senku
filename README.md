@@ -8,6 +8,7 @@ Senku is a stateless Cloudflare Worker that provides bounded, typed JEV decision
 
 | Method | Path | Access |
 | --- | --- | --- |
+| `GET` | `/docs/` | Public HTML guide; enter a machine token to load that identity's contract |
 | `POST` | `/v1/profiles/{profileId}/evaluate` | Authenticated; profile permission checked |
 | `GET` | `/v1/profiles` | Authenticated; returns only permitted profiles |
 | `GET` | `/v1/profiles/{profileId}` | Authenticated; public contract for a permitted profile |
@@ -53,6 +54,8 @@ Configure two separate strong machine tokens: `SENKU_KASEKI_API_TOKEN` and `SENK
 Kaseki may call its five profiles. Soyuz may call its four profiles. Both identities are restricted to server-owned profiles; arbitrary caller-defined questions are not accepted. Authenticated responses use `Cache-Control: no-store`. Senku does not enable CORS.
 
 `GET /utcp` uses the same bearer identity and central permission matrix. Kaseki discovers five profile tools; Soyuz discovers four. Every tool calls its existing profile REST route. The manual never exposes credentials or caller-defined question endpoints. See [docs/UTCP.md](docs/UTCP.md) for client setup and body mapping.
+
+`GET /docs/` serves a self-contained HTML API guide with no external UI libraries or assets. Enter a machine token to load and download the matching permission-filtered OpenAPI document. The page sends it only to the same Senku origin, clears the input after submission, and does not save it in browser storage. `GET /docs` redirects to `/docs/`.
 
 The current Worker uses bearer tokens. Soyuz's Service Binding client sends its dedicated bearer identity through the same authenticated profile routes; Senku's central permission policy remains unchanged.
 
