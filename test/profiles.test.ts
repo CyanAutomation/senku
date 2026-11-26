@@ -520,6 +520,33 @@ const env: Environment = {
   });
 
 describe("shared profile engine", () => {
+  it("measures the prepared decision request once before evaluation", async () => {
+    const stringify = vi.spyOn(JSON, "stringify");
+    const requestDecision = async (request: DecisionRequest) => ({
+      model: "typesafe/jev-1.14-20261014",
+      answers: rawAnswers(request.questions),
+    });
+
+    try {
+      await evaluateProfile(
+        "task_admission_v1",
+        taskAdmissionInput,
+        { clientIdentity: "kaseki" },
+        { env, requestDecision },
+      );
+
+      const requestSerializations = stringify.mock.calls.filter(([value]) =>
+        value !== null && typeof value === "object"
+          && Object.hasOwn(value, "schemaVersion")
+          && Object.hasOwn(value, "state")
+          && Object.hasOwn(value, "questions"),
+      );
+      expect(requestSerializations).toHaveLength(1);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
   it("maps non-serializable request data to a typed input error before provider invocation", async () => {
     const profile = profileRegistry.getProfile("run_operations_triage_v1");
     const cyclicState: Record<string, unknown> = {};
