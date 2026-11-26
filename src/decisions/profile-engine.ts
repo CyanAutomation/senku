@@ -49,7 +49,8 @@ function prepareProfileRequest(profile: AnyDecisionProfile, input: unknown): Pre
     state: decision.state,
     questions: decision.questions,
   };
-  if (serializedSize(request) > LIMITS.requestBytes) {
+  const requestBytes = serializedSize(request);
+  if (requestBytes > LIMITS.requestBytes) {
     throw new ProfileEngineError("PROFILE_INPUT_TOO_LARGE");
   }
 
@@ -62,7 +63,7 @@ function prepareProfileRequest(profile: AnyDecisionProfile, input: unknown): Pre
   const evidenceBytes = typeof decision.state === "string"
     ? utf8Size(decision.state)
     : serializedSize(decision.state);
-  if (evidenceBytes > profile.maxEvidenceBytes || serializedSize(request) > LIMITS.requestBytes) {
+  if (evidenceBytes > profile.maxEvidenceBytes) {
     throw new ProfileEngineError("PROFILE_INPUT_TOO_LARGE");
   }
   return { request: validation.value, evidenceBytes, questionCount };
