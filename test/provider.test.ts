@@ -10,7 +10,8 @@ import { createOpenRouterSimulator } from "./helpers/openrouter-simulator";
 const request = kasekiRequest as unknown as DecisionRequest;
 const config: ProviderConfig & { ok: true } = {
   ok: true,
-  apiKey: "test-openrouter-key",
+  requestUrl: "https://provider.example.invalid/api/v1/decisions",
+  authorizationHeader: "TestCredential test-provider-credential",
   model: "~typesafe/jev-latest",
   timeoutMs: 1_000,
 };
@@ -70,14 +71,14 @@ async function expectProviderError(
 }
 
 describe("OpenRouter provider", () => {
-  it("sends one fixed-destination authenticated request and normalizes validated answers", async () => {
+  it("sends one configured provider request and normalizes validated answers", async () => {
     const fetcher = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => jsonResponse(providerBody()));
     const result = await requestOpenRouterDecision(request, config, fetcher);
     const call = fetcher.mock.calls[0];
-    expect(String(call[0])).toBe("https://openrouter.ai/api/alpha/decisions");
+    expect(String(call[0])).toBe("https://provider.example.invalid/api/v1/decisions");
     expect(call[1]?.method).toBe("POST");
     expect(call[1]?.redirect).toBe("manual");
-    expect(new Headers(call[1]?.headers).get("authorization")).toBe("Bearer test-openrouter-key");
+    expect(new Headers(call[1]?.headers).get("authorization")).toBe("TestCredential test-provider-credential");
     const sent = JSON.parse(String(call[1]?.body));
     expect(sent.model).toBe("~typesafe/jev-latest");
     expect(sent.state).toEqual(request.state);
@@ -134,11 +135,11 @@ describe("OpenRouter provider", () => {
     expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("classifies invalid provider headers before attempting fetch without exposing the key", async () => {
+  it("classifies invalid provider headers before attempting fetch without exposing their value", async () => {
     const fetcher = vi.fn();
-    const invalidKey = "private\nkey";
+    const invalidAuthorization = "private\nvalue";
     try {
-      await requestOpenRouterDecision(request, { ...config, apiKey: invalidKey }, fetcher);
+      await requestOpenRouterDecision(request, { ...config, authorizationHeader: invalidAuthorization }, fetcher);
       throw new Error("Expected failure");
     } catch (error) {
       expect(error).toMatchObject({ diagnosticCode: "provider_request_construction_failed", retryable: false });
@@ -259,12 +260,39 @@ describe("OpenRouter provider", () => {
     expect(simulator.callCount).toBe(1);
   });
 
+  it("requires a secure configured provider origin and opaque authorization value", () => {
+    const base = {
+      SENKU_PROVIDER_REQUEST_URL: "https://provider.example.invalid/api/v1/decisions",
+      SENKU_PROVIDER_AUTHORIZATION: "TestCredential test-provider-credential",
+    };
+    expect(resolveProviderConfig(base)).toMatchObject({
+      ok: true,
+      requestUrl: "https://provider.example.invalid/api/v1/decisions",
+      authorizationHeader: "TestCredential test-provider-credential",
+    });
+    for (const SENKU_PROVIDER_REQUEST_URL of [
+      "http://provider.example.invalid/api/v1",
+      "https://provider.example.invalid/api/v1?debug=true",
+      "https://provider.example.invalid/api/v1#fragment",
+      "not-a-url",
+    ]) {
+      expect(resolveProviderConfig({ ...base, SENKU_PROVIDER_REQUEST_URL })).toEqual({ ok: false });
+    }
+    expect(resolveProviderConfig({ ...base, SENKU_PROVIDER_AUTHORIZATION: "" })).toEqual({ ok: false });
+  });
+
   it("constrains configuration to the exact selected model alias", () => {
     expect(DEFAULT_JEV_MODEL).toBe("~typesafe/jev-latest");
-    expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key" })).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
-    expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key", JEV_MODEL: DEFAULT_JEV_MODEL })).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
-    for (const JEV_MODEL of ["typesafe/jev-latest", "typesafe/jev-1.13", "~typesafe/jev-1.14", " ~typesafe/jev-latest"]) {
-      expect(resolveProviderConfig({ OPENROUTER_API_KEY: "test-key", JEV_MODEL })).toEqual({ ok: false });
+    const base = {
+      SENKU_PROVIDER_REQUEST_URL: "https://provider.example.invalid/api/v1/decisions",
+      SENKU_PROVIDER_AUTHORIZATION: "TestCredential test-provider-credential",
+    };
+    expect(resolveProviderConfig(base)).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
+    expect(resolveProviderConfig({ ...base, JEV_MODEL: DEFAULT_JEV_MODEL })).toMatchObject({ ok: true, model: DEFAULT_JEV_MODEL });
+    expect(resolveProviderConfig({ ...base, JEV_MODEL: "typesafe/jev-1.14-20261014" }))
+      .toMatchObject({ ok: true, model: "typesafe/jev-1.14-20261014" });
+    for (const JEV_MODEL of ["typesafe/jev-latest", "typesafe/jev-1.13", "typesafe/jev-1.14-unknown", "~typesafe/jev-1.14", " ~typesafe/jev-latest"]) {
+      expect(resolveProviderConfig({ ...base, JEV_MODEL })).toEqual({ ok: false });
     }
   });
 
@@ -287,7 +315,7 @@ describe("OpenRouter provider", () => {
     for (const [status, retryable] of failures) {
       await expectProviderError(
         requestOpenRouterDecision(request, config, simulator.fetch),
-        "PROVIDER_UNAVAILABLE",
+        status === 429 ? "PROVIDER_RATE_LIMITED" : "PROVIDER_UNAVAILABLE",
         retryable,
         "provider_http_error",
         status,
@@ -295,6 +323,16 @@ describe("OpenRouter provider", () => {
     }
     expect(simulator.callCount).toBe(failures.length);
     expect(simulator.pendingScenarioCount).toBe(0);
+  });
+
+  it("retries one short provider 429 inside the request deadline and reports attempts", async () => {
+    const simulator = createOpenRouterSimulator([
+      { kind: "response", status: 429, headers: { "retry-after": "0" }, body: "busy" },
+      { kind: "response", body: JSON.stringify(providerBody()) },
+    ]);
+    const result = await requestOpenRouterDecision(request, { ...config, timeoutMs: 2_000 }, simulator.fetch);
+    expect(result.attemptCount).toBe(2);
+    expect(simulator.callCount).toBe(2);
   });
 
   it("classifies network failures and timeouts as retryable with safe diagnostics and without retrying", async () => {

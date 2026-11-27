@@ -14,13 +14,19 @@ const isPerfSmoke = typeof __SENKU_PERF_SMOKE__ !== "undefined" && __SENKU_PERF_
 
 const KASEKI_TOKEN = "utcp-kaseki-synthetic-token-0123456789abcdef";
 const SOYUZ_TOKEN = "utcp-soyuz-synthetic-token-0123456789abcdef";
-const OPENROUTER_KEY = "synthetic-openrouter-secret-never-in-manual";
+const PROVIDER_AUTHORIZATION = "TestCredential synthetic-provider-value-never-in-manual";
 const LOCAL_BASE_URL = "http://127.0.0.1:8787";
+const rateLimit = { limit: async () => ({ success: true }) };
 
 const environment: Environment = {
-  OPENROUTER_API_KEY: OPENROUTER_KEY,
+  SENKU_PROVIDER_REQUEST_URL: "https://provider.example.invalid/api/v1/decisions",
+  SENKU_PROVIDER_AUTHORIZATION: PROVIDER_AUTHORIZATION,
   SENKU_KASEKI_API_TOKEN: KASEKI_TOKEN,
   SENKU_SOYUZ_API_TOKEN: SOYUZ_TOKEN,
+  SENKU_RATE_LIMIT_IP: rateLimit,
+  SENKU_RATE_LIMIT_KASEKI: rateLimit,
+  SENKU_RATE_LIMIT_SOYUZ: rateLimit,
+  SENKU_RATE_LIMIT_RUSTY_FOSSIL: rateLimit,
   SENKU_PUBLIC_BASE_URL: LOCAL_BASE_URL,
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
@@ -103,7 +109,7 @@ async function startClient(
 const taskAdmissionRequest = {
   schemaVersion: "1",
   input: {
-    repoUrl: "https://github.com/CyanAutomation/senku",
+    repoUrl: "https://code.example.invalid/org/repository",
     taskPrompt: "Assess this bounded example task.",
   },
 };
@@ -148,8 +154,8 @@ const runTriageRequest = {
       expect(JSON.stringify(tool.inputs)).toContain('"schemaVersion"');
       expect(JSON.stringify(tool.outputs)).toContain('"additionalProperties"');
       expect(JSON.stringify(tool.outputs)).toContain('"confidence"');
-      expect(JSON.stringify(tool)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ)_API_TOKEN|OPENROUTER_API_KEY/);
-      expect(JSON.stringify(tool)).not.toContain(OPENROUTER_KEY);
+      expect(JSON.stringify(tool)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ)_API_TOKEN|SENKU_PROVIDER_AUTHORIZATION/);
+      expect(JSON.stringify(tool)).not.toContain(PROVIDER_AUTHORIZATION);
       expect(JSON.stringify(tool.inputs)).not.toMatch(/\$ref|oneOf|anyOf/);
       expect(JSON.stringify([tool.inputs, tool.outputs])).not.toMatch(/"x-[^"]+"\s*:/);
       const profileId = /\/v1\/profiles\/([a-z0-9_]+)\/evaluate$/.exec(tool.tool_call_template.url)![1];
@@ -159,7 +165,7 @@ const runTriageRequest = {
       expect(tool.outputs).toEqual(projectJsonSchemaForUtcp(profileEvaluationResponseSchema(profile, profileAnswersSchema(profile))));
     }
     expect(JSON.stringify(kaseki)).not.toContain("/v1/decisions");
-    expect(JSON.stringify(kaseki)).not.toContain("openrouter.ai");
+    expect(JSON.stringify(kaseki)).not.toContain("provider.example.invalid");
 
     const malformed = structuredClone(kaseki);
     (malformed.tools[0] as unknown as { description: string }).description = null as unknown as string;
@@ -305,11 +311,10 @@ const runTriageRequest = {
   it("rejects unsafe public base URLs and normalizes loopback origins", async () => {
     for (const invalid of [
       undefined,
-      "http://senku.example.com",
-      "https://user:pass@senku.example.com",
-      "https://senku.example.com/path",
-      "https://senku.example.com?token=secret",
-      "https://senku.example.com#manual",
+      "http://service.example.invalid",
+      "https://service.example.invalid/path",
+      "https://service.example.invalid?token=secret",
+      "https://service.example.invalid#manual",
       "file:///tmp/senku",
       "http://127.0.0.1e0",
       "http://127.1e2.0.1",
@@ -355,7 +360,7 @@ const runTriageRequest = {
       { ...taskAdmissionRequest, schemaVersion: "2" },
       { schemaVersion: "1", input: { repoUrl: "file:///etc/passwd", taskPrompt: "private-invalid-evidence-marker" } },
       { schemaVersion: "1", input: {
-        repoUrl: "https://github.com/CyanAutomation/senku",
+        repoUrl: "https://code.example.invalid/org/repository",
         taskPrompt: "t".repeat(16_000),
         validationCommands: Array.from({ length: 32 }, () => "c".repeat(512)),
         changedFilesAllowlist: Array.from({ length: 64 }, () => "f".repeat(512)),
@@ -370,7 +375,7 @@ const runTriageRequest = {
         await expect(invalidClient.callTool("senku.assess_task_admission", { request })).rejects.toThrow();
       }
       expect(invalidRequests.slice(1).map((item) => item.status)).toEqual([400, 400, 413]);
-      expect(invalidRequests.slice(1).every((item) => !item.responseBody.includes(OPENROUTER_KEY))).toBe(true);
+      expect(invalidRequests.slice(1).every((item) => !item.responseBody.includes(PROVIDER_AUTHORIZATION))).toBe(true);
       expect(invalidRequests[2].responseBody).not.toContain("private-invalid-evidence-marker");
       expect(provider).not.toHaveBeenCalled();
     } finally {
@@ -411,7 +416,7 @@ const runTriageRequest = {
       items: { properties: { output: { description: "Senku also enforces a UTF-8 byte limit of 2000 bytes." } } },
     });
     expect(JSON.stringify(nested)).not.toMatch(/"x-[^"]+"\s*:/);
-    expect(serializeUtcpManual("kaseki", LOCAL_BASE_URL)).not.toContain(OPENROUTER_KEY);
+  expect(serializeUtcpManual("kaseki", LOCAL_BASE_URL)).not.toContain(PROVIDER_AUTHORIZATION);
 
     const openapi = buildOpenApiDocument("kaseki") as { paths: Record<string, unknown> };
     expect(openapi.paths).toHaveProperty("/utcp");

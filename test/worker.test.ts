@@ -14,6 +14,10 @@ describe("Worker routes", () => {
       ...env,
       SENKU_PROVIDER_TIMEOUT_MS: "30001",
     });
+    const evaluationReadyWithoutDiscoveryUrl = await worker.fetch(new Request("https://service.example.invalid/readyz"), {
+      ...env,
+      SENKU_PUBLIC_BASE_URL: undefined,
+    });
 
     expect(health.status).toBe(200);
     expect(await health.json()).toEqual({ status: "ok" });
@@ -21,6 +25,7 @@ describe("Worker routes", () => {
     expect(await ready.json()).toEqual({ status: "ready" });
     expect(notReady.status).toBe(503);
     expect(await notReady.json()).toEqual({ status: "not_ready" });
+    expect(evaluationReadyWithoutDiscoveryUrl.status).toBe(200);
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 

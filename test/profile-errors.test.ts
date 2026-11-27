@@ -29,7 +29,10 @@ describe("profile error mapping", () => {
   });
 
   it("preserves provider diagnostics and identifies invalid profile output", () => {
-    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid", 401, 17, "connection");
+    const providerError = new ProviderError("INVALID_PROVIDER_RESPONSE", false, {
+      diagnosticCode: "response_answer_invalid", upstreamStatus: 401, providerDurationMs: 17,
+      providerFetchFailureClass: "connection",
+    });
     expect(profileProviderDiagnosticCode(providerError)).toBe("response_answer_invalid");
     expect(profileProviderDiagnostics(providerError)).toEqual({
       providerDiagnosticCode: "response_answer_invalid",
@@ -45,13 +48,13 @@ describe("profile error mapping", () => {
   });
 
   it("keeps provider retry-delay diagnostics within the public bound", () => {
-    const valid = new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_http_error", 429, 17, undefined, undefined, undefined, undefined, 7);
+    const valid = new ProviderError("PROVIDER_RATE_LIMITED", true, { diagnosticCode: "provider_http_error", upstreamStatus: 429, providerDurationMs: 17, retryAfterSeconds: 7 });
     expect(profileProviderDiagnostics(valid).providerRetryAfterSeconds).toBe(7);
 
-    const excessive = new ProviderError("PROVIDER_UNAVAILABLE", true, "provider_http_error", 429, 17, undefined, undefined, undefined, undefined, 86_401);
+    const excessive = new ProviderError("PROVIDER_RATE_LIMITED", true, { diagnosticCode: "provider_http_error", upstreamStatus: 429, providerDurationMs: 17, retryAfterSeconds: 86_401 });
     expect(profileProviderDiagnostics(excessive)).not.toHaveProperty("providerRetryAfterSeconds");
 
-    const permanent = new ProviderError("PROVIDER_UNAVAILABLE", false, "provider_http_error", 402, 17, undefined, undefined, undefined, undefined, 7);
+    const permanent = new ProviderError("PROVIDER_UNAVAILABLE", false, { diagnosticCode: "provider_http_error", upstreamStatus: 402, providerDurationMs: 17, retryAfterSeconds: 7 });
     expect(profileProviderDiagnostics(permanent)).not.toHaveProperty("providerRetryAfterSeconds");
   });
 });

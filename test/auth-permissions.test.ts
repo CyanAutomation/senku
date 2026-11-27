@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { authenticateBearer, isMachineTokenConfigValid } from "../src/auth/bearer";
+import { areMachineTokenCredentialsDistinct, authenticateBearer, isMachineTokenConfigValid } from "../src/auth/bearer";
 import {
   canEvaluateProfile,
   PROFILE_CLIENT_PERMISSIONS,
@@ -33,6 +33,28 @@ describe("machine bearer configuration", () => {
     expect(await authenticateBearer(`Bearer ${validToken}`, { SENKU_KASEKI_API_TOKEN: validToken, SENKU_SOYUZ_API_TOKEN: validToken }))
       .toEqual({ authenticated: false, reason: "not_configured" });
   });
+
+  it("accepts current and next credentials during a distinct, per-identity rotation window", async () => {
+    const rustyToken = "senku-rusty-fossil-machine-token-0123456789";
+    const env = {
+      SENKU_KASEKI_API_TOKEN: validToken,
+      SENKU_KASEKI_API_TOKEN_NEXT: "senku-kaseki-next-machine-token-0123456789",
+      SENKU_SOYUZ_API_TOKEN: validSoyuzToken,
+      SENKU_RUSTY_FOSSIL_API_TOKEN: rustyToken,
+    };
+    expect(areMachineTokenCredentialsDistinct(env)).toBe(true);
+    expect(await authenticateBearer(`Bearer ${validToken}`, env)).toEqual({ authenticated: true, clientId: "kaseki" });
+    expect(await authenticateBearer(`Bearer ${env.SENKU_KASEKI_API_TOKEN_NEXT}`, env)).toEqual({ authenticated: true, clientId: "kaseki" });
+    expect(await authenticateBearer(`Bearer ${rustyToken}`, env)).toEqual({ authenticated: true, clientId: "rusty_fossil" });
+    expect(areMachineTokenCredentialsDistinct({
+      ...env,
+      SENKU_RUSTY_FOSSIL_API_TOKEN: env.SENKU_KASEKI_API_TOKEN_NEXT,
+    })).toBe(false);
+    expect(areMachineTokenCredentialsDistinct({
+      ...env,
+      SENKU_KASEKI_API_TOKEN_NEXT: "short",
+    })).toBe(false);
+  });
 });
 
 describe("client permissions and registry", () => {
@@ -45,7 +67,10 @@ describe("client permissions and registry", () => {
       expect(canEvaluateProfile(id, "kaseki")).toBe(true);
       expect(canEvaluateProfile(id, "soyuz")).toBe(false);
     }
-    expect(PROFILE_CLIENT_PERMISSIONS.task_admission_v1).toEqual(["kaseki"]);
+    for (const id of ["task_admission_v1", "kaseki_goal_check_v1", "kaseki_run_evaluation_v1", "kaseki_context_routing_v1", "validation_recovery_v1"] as const) {
+      expect(canEvaluateProfile(id, "rusty_fossil")).toBe(true);
+    }
+    expect(PROFILE_CLIENT_PERMISSIONS.task_admission_v1).toEqual(["kaseki", "rusty_fossil"]);
   });
 
   it("rejects unknown and duplicate profile registration", () => {

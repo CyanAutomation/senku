@@ -17,7 +17,7 @@ const inputs: Record<ProfileId, unknown> = {
     source: { status: "failed", failureClass: "validation_failure", exitCode: 1, changedFileCount: 2, summary: "The original checks failed." },
     retry: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3, summary: "The retry passed the checks." },
   } },
-  task_admission_v1: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated REST API." },
+  task_admission_v1: { repoUrl: "https://code.example.invalid/org/repository", taskPrompt: "Add the authenticated REST API." },
   kaseki_goal_check_v1: { state: { evidence: "bounded" }, criteria: [{ id: "criterion_1", criterion: "The goal is met." }] },
   kaseki_run_evaluation_v1: { state: { evidence: "bounded" }, includeFailureDiagnosis: false },
   kaseki_context_routing_v1: { mode: "tool_output", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false } },
@@ -36,7 +36,7 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
 }
 
   it("returns a structurally complete OpenAPI 3.1 document for each identity", () => {
-    for (const identity of ["kaseki", "soyuz"] as const) {
+    for (const identity of ["kaseki", "soyuz", "rusty_fossil"] as const) {
       const document = buildOpenApiDocument(identity) as Record<string, unknown>;
       expect(document).toMatchObject({
         openapi: "3.1.0",
@@ -50,9 +50,19 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
       expect(paths).toHaveProperty("/utcp");
       expect(paths).toHaveProperty("/healthz");
       expect(paths).toHaveProperty("/readyz");
-      const profileEvaluation = (paths["/v1/profiles/{profileId}/evaluate"] as { post: { responses: Record<string, unknown> } }).post;
+      const profileEvaluation = (paths["/v1/profiles/{profileId}/evaluate"] as {
+        post: { responses: Record<string, unknown>; parameters: Array<Record<string, unknown>> };
+      }).post;
       expect(profileEvaluation.responses).toHaveProperty("405");
       expect(profileEvaluation.responses).toHaveProperty("415");
+      expect(profileEvaluation.responses).toHaveProperty("429");
+      expect(profileEvaluation.parameters).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: "X-Correlation-Id", in: "header" }),
+        expect.objectContaining({ name: "X-Senku-Deadline-Ms", in: "header" }),
+      ]));
+      expect(profileEvaluation.responses["429"]).toMatchObject({
+        headers: { "Retry-After": { schema: { type: "integer", minimum: 0, maximum: 86_400 } } },
+      });
       expect(profileEvaluation.responses["502"]).toMatchObject({
         headers: { "Retry-After": { schema: { type: "integer", minimum: 0, maximum: 86_400 } } },
       });
@@ -71,7 +81,7 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
         expect(components.schemas).toHaveProperty(name);
       }
       expect(JSON.stringify(document)).not.toContain("Does this run record warrant human follow-up now?");
-      expect(JSON.stringify(document)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ)_API_TOKEN|OPENROUTER_API_KEY/);
+      expect(JSON.stringify(document)).not.toMatch(/SENKU_(?:KASEKI|SOYUZ|RUSTY_FOSSIL)_API_TOKEN|SENKU_PROVIDER_AUTHORIZATION/);
       expect(JSON.stringify(paths)).not.toMatch(/mcp/i);
     }
   });
@@ -79,8 +89,10 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
   it("documents every profile contract only for identities permitted to use it", () => {
     const kasekiIds = listPublicProfiles("kaseki").map((item) => item.id);
     const soyuzIds = listPublicProfiles("soyuz").map((item) => item.id);
+    const rustyIds = listPublicProfiles("rusty_fossil").map((item) => item.id);
     expect(kasekiIds).toEqual(["task_admission_v1", "kaseki_goal_check_v1", "kaseki_run_evaluation_v1", "kaseki_context_routing_v1", "validation_recovery_v1"]);
     expect(soyuzIds).toEqual(["run_operations_triage_v1", "kaseki_output_review_v1", "kaseki_output_review_v2", "run_retry_review_v1"]);
+    expect(rustyIds).toEqual(kasekiIds);
     expect(kasekiIds).not.toContain("run_operations_triage_v1");
     expect(soyuzIds).not.toContain("task_admission_v1");
 
@@ -127,10 +139,10 @@ function collectRefs(value: unknown, output: string[] = []): string[] {
     const taskAdmission = profileRegistry.getProfile("task_admission_v1");
     const taskBase = inputs.task_admission_v1 as Record<string, unknown>;
     const invalidUrls = [
-      "ftp://github.com/CyanAutomation/senku",
-      "https://user:password@github.com/CyanAutomation/senku",
-      "https://github.com/CyanAutomation/senku?token=private",
-      "https://github.com/CyanAutomation/senku#private",
+      "ftp://code.example.invalid/org/repository",
+      "not-a-uri",
+      "https://code.example.invalid/org/repository?branch=main",
+      "https://code.example.invalid/org/repository#fragment",
     ];
     for (const repoUrl of invalidUrls) {
       const candidate = { ...taskBase, repoUrl };

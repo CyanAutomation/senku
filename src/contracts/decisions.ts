@@ -20,6 +20,9 @@ export const ERROR_CODES = [
   "NOT_CONFIGURED",
   "PROVIDER_TIMEOUT",
   "PROVIDER_UNAVAILABLE",
+  "PROVIDER_RATE_LIMITED",
+  "RATE_LIMITED",
+  "RATE_LIMIT_UNAVAILABLE",
   "INVALID_PROVIDER_RESPONSE",
   "NOT_FOUND",
   "INTERNAL_ERROR",
@@ -96,7 +99,7 @@ export interface DecisionResponse {
   answers: Record<string, DecisionAnswer>;
   usage?: ProviderUsage;
   durationMs: number;
-  attemptCount: 1;
+  attemptCount: number;
 }
 
 export type ErrorCode = typeof ERROR_CODES[number];
@@ -111,10 +114,23 @@ export interface ErrorResponse {
 }
 
 export interface Environment {
-  OPENROUTER_API_KEY?: string;
+  SENKU_PROVIDER_REQUEST_URL?: string;
+  SENKU_PROVIDER_AUTHORIZATION?: string;
   SENKU_KASEKI_API_TOKEN?: string;
+  SENKU_KASEKI_API_TOKEN_NEXT?: string;
   SENKU_SOYUZ_API_TOKEN?: string;
+  SENKU_SOYUZ_API_TOKEN_NEXT?: string;
+  SENKU_RUSTY_FOSSIL_API_TOKEN?: string;
+  SENKU_RUSTY_FOSSIL_API_TOKEN_NEXT?: string;
   SENKU_PUBLIC_BASE_URL?: string;
   JEV_MODEL?: string;
   SENKU_PROVIDER_TIMEOUT_MS?: string;
+  SENKU_RATE_LIMIT_IP?: RateLimitBinding;
+  SENKU_RATE_LIMIT_KASEKI?: RateLimitBinding;
+  SENKU_RATE_LIMIT_SOYUZ?: RateLimitBinding;
+  SENKU_RATE_LIMIT_RUSTY_FOSSIL?: RateLimitBinding;
+}
+
+export interface RateLimitBinding {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
 }

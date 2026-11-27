@@ -6,7 +6,8 @@ import { serializeOpenApiDocument } from "./api/openapi";
 import { getPublicProfileContract, listPublicProfiles } from "./api/profile-contracts";
 import { profileApiError, profileProviderDiagnostics } from "./api/profile-errors";
 import type { ProviderCauseCode, ProviderErrorType, ProviderFetchFailureClass } from "./providers/openrouter/fetch-diagnostics";
-import { serializeUtcpManual, trustedSenkuOrigin } from "./api/utcp";
+import { BestEffortCircuitBreaker } from "./providers/openrouter/circuit-breaker";
+import { serializeUtcpManual } from "./api/utcp";
 import { LIMITS, type Environment } from "./contracts/decisions";
 import { isPlainRecord } from "./contracts/records";
 import { evaluateProfile } from "./decisions/profile-engine";
@@ -19,6 +20,9 @@ import {
   type ProviderDiagnosticCode,
 } from "./providers/openrouter/decisions";
 import { consoleLogger, safeLog, type Logger } from "./observability/log";
+import { checkRateLimit } from "./admission/rate-limit";
+import { correlationIdFromHeader } from "./http/correlation-id";
+import { parseSenkuDeadlineMs } from "./http/deadline";
 
 export interface WorkerDependencies {
   fetchImpl?: typeof fetch;
@@ -27,6 +31,7 @@ export interface WorkerDependencies {
   serializeUtcpManual?: typeof serializeUtcpManual;
   /** Trusted internal identity seam for future server-side callers; never populated from request data. */
   resolveIdentity?: (request: Request, env: Environment) => Promise<AuthenticationResult>;
+  providerCircuitBreaker?: BestEffortCircuitBreaker;
 }
 
 function jsonResponse(value: unknown, status = 200): Response {
@@ -59,8 +64,9 @@ function timeoutIsStructurallyValid(env: Environment): boolean {
 
 function ready(env: Environment): boolean {
   return areMachineTokenCredentialsDistinct(env)
-    && trustedSenkuOrigin(env.SENKU_PUBLIC_BASE_URL) !== null
     && resolveProviderConfig(env).ok
+    && Boolean(env.SENKU_RATE_LIMIT_IP && env.SENKU_RATE_LIMIT_KASEKI
+      && env.SENKU_RATE_LIMIT_SOYUZ && env.SENKU_RATE_LIMIT_RUSTY_FOSSIL)
     && timeoutIsStructurallyValid(env);
 }
 
@@ -126,6 +132,7 @@ function logFailure(
   logger: Logger,
   details: {
     requestId: string;
+    correlationId?: string;
     clientId?: string;
     error: ApiError;
     method: string;
@@ -150,6 +157,7 @@ function logFailure(
   safeLog(logger, {
     event: details.event ?? "decision.request_failed",
     requestId: details.requestId,
+    correlationId: details.correlationId,
     clientId: details.clientId ?? "unknown",
     status: details.error.code,
     errorCode: details.error.code,
@@ -176,6 +184,7 @@ function internalRouteFailure(
   logger: Logger,
   details: {
     requestId: string;
+    correlationId: string;
     clientId: ClientIdentity;
     request: Request;
     path: string;
@@ -185,6 +194,7 @@ function internalRouteFailure(
   const error = new ApiError("INTERNAL_ERROR");
   logFailure(logger, {
     requestId: details.requestId,
+    correlationId: details.correlationId,
     clientId: details.clientId,
     error,
     method: details.request.method,
@@ -232,12 +242,14 @@ interface WorkerRuntime {
   logger: Logger;
   serializeManual: typeof serializeUtcpManual;
   resolveIdentity: (request: Request, env: Environment) => Promise<AuthenticationResult>;
+  providerCircuitBreaker: BestEffortCircuitBreaker;
 }
 
 interface RequestContext extends WorkerRuntime {
   request: Request;
   env: Environment;
   id: string;
+  correlationId: string;
   started: number;
 }
 
@@ -289,6 +301,7 @@ function logProfileRequestFailure(
 ): Response {
   logFailure(context.logger, {
     requestId: context.id,
+    correlationId: context.correlationId,
     clientId,
     error,
     method: context.request.method,
@@ -307,6 +320,7 @@ function profileEvaluationFailure(
 ): Response {
   logFailure(context.logger, {
     requestId: context.id,
+    correlationId: context.correlationId,
     clientId,
     error,
     method: context.request.method,
@@ -337,6 +351,12 @@ async function evaluateProfileRequest(
 
   let requestBytes = 0;
   let providerAttempts = 0;
+  const deadlineAtMs = parseSenkuDeadlineMs(context.request.headers.get("x-senku-deadline-ms"));
+  if (deadlineAtMs === null) {
+    return profileEvaluationFailure(context, clientId, new ApiError("INVALID_REQUEST"), {
+      profileId, path: route.logPath,
+    });
+  }
   const questionCount = profile.maxQuestionCount ?? Object.keys(profile.questions).length;
   const trackedFetch: typeof fetch = (input, init) => {
     providerAttempts += 1;
@@ -349,7 +369,12 @@ async function evaluateProfileRequest(
     const profileInput = profileInputFromEnvelope(parseJson(input.bytes));
     const result = await evaluateProfile(route.profileId as RegisteredProfileId, profileInput, {
       clientIdentity: clientId,
-    }, { env: context.env, fetchImpl: trackedFetch });
+    }, {
+      env: context.env,
+      fetchImpl: trackedFetch,
+      deadlineAtMs,
+      providerCircuitBreaker: context.providerCircuitBreaker,
+    });
     const response = {
       schemaVersion: "1",
       requestId: context.id,
@@ -367,6 +392,7 @@ async function evaluateProfileRequest(
     safeLog(context.logger, {
       event: "profile.evaluation_completed",
       requestId: context.id,
+      correlationId: context.correlationId,
       clientId,
       profileId: result.profileId,
       profileVersion: result.profileVersion,
@@ -417,19 +443,51 @@ async function handleProfileResource(
   return evaluateProfileRequest(context, clientId, route, profileId, profile);
 }
 
+function identityRateLimit(env: Environment, clientId: ClientIdentity) {
+  switch (clientId) {
+    case "kaseki": return env.SENKU_RATE_LIMIT_KASEKI;
+    case "soyuz": return env.SENKU_RATE_LIMIT_SOYUZ;
+    case "rusty_fossil": return env.SENKU_RATE_LIMIT_RUSTY_FOSSIL;
+  }
+}
+
+function requestIpKey(request: Request): string {
+  const address = request.headers.get("cf-connecting-ip")?.trim();
+  return address && /^[\da-f:.]{1,64}$/i.test(address) ? `ip:${address}` : "ip:unknown";
+}
+
 async function handleProtectedRoute(context: RequestContext, route: ProtectedRoute): Promise<Response> {
   if (context.request.method !== route.expectedMethod) return methodNotAllowed(context.id, route.expectedMethod);
+  const ipAdmission = await checkRateLimit(context.env.SENKU_RATE_LIMIT_IP, requestIpKey(context.request));
+  if (ipAdmission !== "allowed") {
+    const error = ipAdmission === "limited"
+      ? new ApiError("RATE_LIMITED", true, undefined, 60)
+      : new ApiError("RATE_LIMIT_UNAVAILABLE", true);
+    return errorResponse(error, context.id);
+  }
   const authentication = await context.resolveIdentity(context.request, context.env);
   if (!authentication.authenticated) {
     const error = authError(authentication);
     logFailure(context.logger, {
       requestId: context.id,
+      correlationId: context.correlationId,
       error,
       method: context.request.method,
       path: route.logPath,
       workerDurationMs: elapsedMs(context.started),
       event: "profile.request_failed",
     });
+    return errorResponse(error, context.id);
+  }
+
+  const identityLimit = await checkRateLimit(
+    identityRateLimit(context.env, authentication.clientId),
+    `client:${authentication.clientId}`,
+  );
+  if (identityLimit !== "allowed") {
+    const error = identityLimit === "limited"
+      ? new ApiError("RATE_LIMITED", true, undefined, 60)
+      : new ApiError("RATE_LIMIT_UNAVAILABLE", true);
     return errorResponse(error, context.id);
   }
 
@@ -442,6 +500,7 @@ async function handleProtectedRoute(context: RequestContext, route: ProtectedRou
     } catch {
       return internalRouteFailure(context.logger, {
         requestId: context.id,
+        correlationId: context.correlationId,
         clientId: authentication.clientId,
         request: context.request,
         path: route.logPath,
@@ -456,6 +515,7 @@ async function handleProtectedRoute(context: RequestContext, route: ProtectedRou
     } catch {
       return internalRouteFailure(context.logger, {
         requestId: context.id,
+        correlationId: context.correlationId,
         clientId: authentication.clientId,
         request: context.request,
         path: route.logPath,
@@ -475,13 +535,13 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
     serializeManual: dependencies.serializeUtcpManual ?? serializeUtcpManual,
     resolveIdentity: dependencies.resolveIdentity
       ?? ((request, env) => authenticateBearer(request.headers.get("authorization"), env)),
+    providerCircuitBreaker: dependencies.providerCircuitBreaker ?? new BestEffortCircuitBreaker(),
   };
 
   return {
     async fetch(request: Request, env: Environment): Promise<Response> {
       const started = performance.now();
       const id = requestId();
-      const context: RequestContext = { ...runtime, request, env, id, started };
       const path = new URL(request.url).pathname;
       if (path === "/docs" || path === "/docs/") {
         if (request.method !== "GET") return methodNotAllowed(id, "GET");
@@ -491,7 +551,12 @@ export function createWorker(dependencies: WorkerDependencies = {}): {
       if (healthResponse) return healthResponse;
 
       const route = matchProtectedRoute(path);
-      if (route) return handleProtectedRoute(context, route);
+      if (route) {
+        const correlationId = correlationIdFromHeader(request.headers.get("x-correlation-id"), id);
+        if (correlationId === null) return errorResponse(new ApiError("INVALID_REQUEST"), id);
+        const context: RequestContext = { ...runtime, request, env, id, correlationId, started };
+        return handleProtectedRoute(context, route);
+      }
       return errorResponse(new ApiError("NOT_FOUND"), id);
     },
   };

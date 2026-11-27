@@ -9,7 +9,7 @@ import soyuzSimulatorWorker from "../test/soyuz-simulator/worker.ts";
 const SOYUZ_USER_TOKEN = "soyuz-simulator-user-token-0000000000000000";
 const SOYUZ_MACHINE_TOKEN = "soyuz-simulator-machine-token-0000000000000000";
 const KASEKI_MACHINE_TOKEN = "kaseki-simulator-machine-token-0000000000000000";
-const OPENROUTER_KEY = "synthetic-openrouter-key-not-a-real-secret";
+const PROVIDER_AUTHORIZATION = "TestCredential synthetic-provider-value";
 const TASK_MARKER = "SYNTHETIC_SOYUZ_TASK_PROMPT_MUST_STAY_IN_SOYUZ";
 const SOURCE_RUN_ID = "11111111-1111-4111-8111-111111111111";
 const RETRY_RUN_ID = "22222222-2222-4222-8222-222222222222";
@@ -43,7 +43,8 @@ const harness = createTestHarness({
     {
       configPath: "./wrangler.jsonc",
       secrets: {
-        OPENROUTER_API_KEY: OPENROUTER_KEY,
+        SENKU_PROVIDER_REQUEST_URL: "https://provider.example.invalid/api/v1/decisions",
+        SENKU_PROVIDER_AUTHORIZATION: PROVIDER_AUTHORIZATION,
         SENKU_SOYUZ_API_TOKEN: SOYUZ_MACHINE_TOKEN,
         SENKU_KASEKI_API_TOKEN: KASEKI_MACHINE_TOKEN,
       },

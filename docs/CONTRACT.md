@@ -1,169 +1,37 @@
 # REST API contract
 
-Senku exposes a versioned REST API. All JSON responses use `Cache-Control: no-store`. The Worker does not enable CORS.
+This document describes the public request and response shape. The service origin and environment-specific settings are intentionally omitted; consumers use the origin provided for their own environment.
 
 ## Routes
 
-| Method | Path | Authentication and behavior |
+| Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/docs/` | Public self-contained HTML guide; accepts a token in the page to load the matching permission-filtered OpenAPI document. |
-| `GET` | `/docs` | Public 308 redirect to `/docs/`. |
-| `POST` | `/v1/profiles/{profileId}/evaluate` | Bearer authenticated. Checks profile permission before reading evidence or calling JEV. |
-| `GET` | `/v1/profiles` | Bearer authenticated. Lists only profiles the identity may invoke. |
-| `GET` | `/v1/profiles/{profileId}` | Bearer authenticated. Returns the permitted profile's input and output JSON Schemas and limits. A known but forbidden profile returns 403 without its details. |
-| `GET` | `/openapi.json` | Bearer authenticated. Returns a deterministic OpenAPI 3.1 document filtered to the caller's allowed profiles. |
-| `GET` | `/utcp` | Bearer authenticated. Returns the UTCP 1.1 manual filtered to the caller's allowed profiles. |
-| `GET` | `/healthz` | Public liveness response; no configuration or provider call. |
-| `GET` | `/readyz` | Public readiness response; no provider call or secret disclosure. |
+| `GET` | `/v1/profiles` | List the profiles available to the caller. |
+| `GET` | `/v1/profiles/{profileId}` | Read the public contract for one available profile. |
+| `POST` | `/v1/profiles/{profileId}/evaluate` | Validate an input and evaluate the selected profile. |
+| `GET` | `/openapi.json` | Read the OpenAPI document projected for the caller. |
+| `GET` | `/utcp` | Read the caller-specific tool manual. |
+| `GET` | `/healthz` | Check whether the Worker is responding. |
+| `GET` | `/readyz` | Check whether the Worker is ready to handle requests. |
 
-Wrong methods return 405 with `Allow`. Unknown routes return 404.
+## Evaluation
 
-## Machine identity and permission matrix
+Evaluation requests use JSON and identify a versioned profile in the path. The body supplies the supported schema version and a profile-specific input object. The response follows the selected profile's published output schema.
 
-The Worker authenticates `Authorization: Bearer <token>` against two separate secrets:
+The profile registry is the source of truth for input validation, output contracts, and profile metadata. The generated contract artifact provides a stable, reviewable snapshot for clients.
 
-| Identity | Secret | Generic decisions | Permitted profiles |
-| --- | --- | --- | --- |
-| Kaseki | `SENKU_KASEKI_API_TOKEN` | Yes | `task_admission_v1`, `kaseki_goal_check_v1`, `kaseki_run_evaluation_v1`, `kaseki_context_routing_v1`, `validation_recovery_v1` |
-| Soyuz | `SENKU_SOYUZ_API_TOKEN` | No | `run_operations_triage_v1`, `kaseki_output_review_v1`, `kaseki_output_review_v2`, `run_retry_review_v1` |
+## Caller access
 
-Both values must be configured, valid, and different. Each is 32–1,024 printable ASCII characters without whitespace. An absent, malformed, or duplicated credential configuration fails closed for all bearer-authenticated operations; readiness is false. Token comparison uses SHA-256 digests and a fixed-length byte loop. Credentials are never logged or returned.
+The service applies its configured caller policy before returning profile metadata or evaluating a request. Each caller receives only the operations and profiles assigned by the environment's policy. Callers cannot submit arbitrary instructions or choose an upstream destination through the evaluation input.
 
-Identity is established only from the authenticated token. Senku ignores client identity supplied in JSON, query parameters, or headers. The HTTP layer exposes an internal `resolveIdentity` dependency for future trusted server-derived identity, so a Service Binding integration need not change the profile engine. That seam is not populated from caller-controlled request data. A Service Binding by itself grants no profile permission.
+## Responses and failures
 
-The authoritative policy lives in `src/auth/permissions.ts`. Registry metadata and discovery are derived from that policy rather than a second client list.
+Successful evaluations return a typed result with request metadata. Invalid requests, unavailable profiles, rejected callers, admission limits, timeouts, and upstream failures use bounded error responses with a stable error code and correlation identifier. Responses do not include raw upstream payloads or credential values.
 
-## Profile evaluation
+## Resilience boundaries
 
-`POST /v1/profiles/{profileId}/evaluate` accepts JSON with this envelope:
+The provider adapter isolates external transport from profile evaluation. Request deadlines, bounded retry behavior, circuit breaking, and admission controls protect the Worker from unbounded work. Provider-specific addresses and environment settings are maintained outside this public contract.
 
-```json
-{
-  "schemaVersion": "1",
-  "input": {
-    "run": {
-      "status": "failed",
-      "stage": "validation",
-      "operationalHealth": "suspect_stalled",
-      "failureClass": "provider_failure",
-      "createdAt": "2026-11-08T12:00:00.000Z",
-      "queuedAt": "2026-11-08T12:00:01.000Z",
-      "startedAt": "2026-11-08T12:00:02.000Z",
-      "completedAt": "2026-11-08T12:00:03.000Z",
-      "lastHeartbeatAt": "2026-11-08T12:00:02.500Z"
-    }
-  }
-}
-```
+## Compatibility
 
-The `input` object must match the selected profile's exact contract. Unknown fields are rejected. Callers provide evidence, never JEV questions, instructions, model names, or provider URLs. See [PROFILES.md](PROFILES.md) and the authenticated `/v1/profiles/{profileId}` route for full schemas.
-
-Successful evaluations return the same envelope shape for every profile:
-
-```json
-{
-  "schemaVersion": "1",
-  "requestId": "dec-00000000-0000-4000-8000-000000000000",
-  "status": "completed",
-  "profileId": "run_operations_triage_v1",
-  "profileVersion": "1",
-  "provider": "jev",
-  "model": "typesafe/jev-resolved-version",
-  "answers": {},
-  "result": {},
-  "usage": { "input_tokens": 120 },
-  "durationMs": 840,
-  "attemptCount": 1
-}
-```
-
-`usage` is omitted when the provider supplies none. `result` retains the profile's canonical answer map and duplicates `answers` for a stable envelope. Canonical choice and score answers support `confidence: null`; NouL answers always have null confidence because that result type does not carry a separate confidence value. The API never substitutes a guessed confidence.
-
-The server validates evidence, builds each profile's fixed or input-derived server-owned questions, makes exactly one provider attempt, validates all returned answer keys and values against that generated set, and only then returns a successful assessment. Errors never contain raw evidence, question prompts, provider responses, credentials, or stack traces. Failures do not produce a successful `result`.
-
-## Discovery and OpenAPI
-
-`GET /v1/profiles` returns:
-
-```json
-{
-  "schemaVersion": "1",
-  "profiles": [
-    {
-      "id": "run_operations_triage_v1",
-      "version": "1",
-      "name": "Run operations triage",
-      "description": "Assess retained Kaseki run operational metadata using Soyuz's approved projection.",
-      "owner": "soyuz",
-      "questionCount": 3,
-      "dynamicQuestions": false,
-      "maxEvidenceBytes": 12288,
-      "operations": ["evaluate"]
-    }
-  ]
-}
-```
-
-The list is filtered by the central permission policy. `questionCount` is the fixed count or dynamic maximum. Profile contracts contain identity/version, description, input schema, output schema, request/evidence/question limits, and the evaluation endpoint. They omit internal JEV question text, provider credentials, and infrastructure configuration.
-
-`GET /utcp` applies the same authenticated identity filter and returns one native HTTP tool per permitted profile. Its manual version is `1.0.0`; its UTCP protocol version is `1.1`. Each tool calls `POST /v1/profiles/{profileId}/evaluate` directly and maps the complete `{ "schemaVersion": "1", "input": ... }` request from the tool's `request` argument using `body_field: "request"`. The manual is generated from the registry, includes a client-side bearer-variable placeholder, uses the configured trusted `SENKU_PUBLIC_BASE_URL`, and never calls the provider. The response is `no-store`. See [UTCP.md](UTCP.md) for verified reference-client behavior.
-
-`GET /openapi.json` builds OpenAPI 3.1 from profile-owned input JSON Schemas, response schemas derived from the server-owned question maps, shared request/answer/error contracts, and implemented routes, including `/utcp`. The authenticated document includes only the profile contracts and UTCP tools available to that identity. Neither identity receives a generic caller-defined question endpoint. Structural, route, reference, permission, schema/runtime parity, and independent Redocly OpenAPI validation run offline.
-
-`GET /docs/` is an unauthenticated HTML shell. It does not embed profile data; a developer enters a machine token and the page requests `/openapi.json` from the same origin with that bearer credential. The token is cleared from the form after submission, is not added to the URL, and is not written to browser storage. The page uses a small built-in renderer, nonce-based Content Security Policy, and same-origin fetch. It has no external scripts, stylesheets, or documentation library. `/docs` redirects to `/docs/`.
-
-## Retired generic decisions endpoint
-
-The former `POST /v1/decisions` route accepted caller-defined questions. It has been removed; requests to that path return `404` for both identities. Kaseki and Soyuz callers must use their permitted versioned profiles so Senku owns question wording, answer IDs, and output validation.
-
-## Bounds and errors
-
-The streamed request body limit is 128 KiB; the provider response limit is 64 KiB. Global limits include 64 questions, 12 options per choice or score, content depth 24, 8,192 content nodes, and 16 KiB per instruction. Each profile has a smaller projected-evidence cap documented in [PROFILES.md](PROFILES.md).
-
-Errors use the established envelope:
-
-```json
-{
-  "error": {
-    "code": "FORBIDDEN",
-    "message": "The authenticated client is not permitted to use this endpoint.",
-    "retryable": false,
-    "requestId": "dec-00000000-0000-4000-8000-000000000000"
-  }
-}
-```
-
-| Internal condition | HTTP | Public code |
-| --- | ---: | --- |
-| Malformed request, invalid profile input, or unsupported schema version | 400 | `INVALID_REQUEST` or `UNSUPPORTED_SCHEMA_VERSION` |
-| Missing or invalid bearer token | 401 | `UNAUTHENTICATED` |
-| Authenticated identity lacks permission | 403 | `FORBIDDEN` |
-| Unknown route | 404 | `NOT_FOUND` |
-| Unknown or unauthorized profile ID | 403 | `FORBIDDEN` |
-| Request or profile evidence over its limit | 413 | `PAYLOAD_TOO_LARGE` |
-| Invalid service configuration | 503 | `NOT_CONFIGURED` |
-| Invalid provider response/profile output | 502 | `INVALID_PROVIDER_RESPONSE` |
-| Provider unavailable | 502 | `PROVIDER_UNAVAILABLE` |
-| Provider timeout | 504 | `PROVIDER_TIMEOUT` |
-| Unexpected internal failure | 500 | `INTERNAL_ERROR` |
-| Wrong HTTP method | 405 | `INVALID_REQUEST` plus `Allow` |
-
-Provider errors preserve their retryable classification. No automatic retry is performed.
-
-For a retryable upstream HTTP failure, Senku forwards a valid `Retry-After` value as an HTTP response header when it is no more than 24 hours. Delta-seconds and standard HTTP dates are normalized to seconds; malformed, excessive, and non-retryable hints are omitted. The header is a bounded upstream hint, not a retry authorization. Callers should apply their own attempt limit, jitter, and overall deadline. A timeout can occur after the provider has processed and billed the request, so retrying it can incur a duplicate charge.
-
-| Provider outcome | Senku response | Retryable | Notes |
-| --- | --- | --- | --- |
-| Request timeout, including a stalled response body | `504 PROVIDER_TIMEOUT` | Yes | One provider attempt; records timeout classification and duration. |
-| Network or response-stream failure | `502 PROVIDER_UNAVAILABLE` | Yes | Upstream details are omitted. |
-| Upstream `408`, `425`, `429`, or `5xx` | `502 PROVIDER_UNAVAILABLE` | Yes | A valid `Retry-After` may be forwarded. |
-| Other upstream non-2xx status | `502 PROVIDER_UNAVAILABLE` | No | Status is retained in bounded diagnostics. |
-| Malformed or invalid successful response | `502 INVALID_PROVIDER_RESPONSE` | No | Senku returns no partial assessment. |
-
-Routine tests inject provider scenarios through `createOpenRouterSimulator` in `test/helpers/openrouter-simulator.ts`. It restricts requests to the fixed OpenRouter URL and supports network failures, delayed headers and body chunks, interrupted streams, arbitrary status/headers, and malformed bytes. The Service Binding harness verifies that a failed evaluation does not trigger an internal retry and that a new evaluation succeeds after the simulated provider recovers. These tests make no live provider calls.
-
-## Provider and deployment behavior
-
-Senku always sends one request to the fixed OpenRouter Decisions API endpoint and uses only `~typesafe/jev-latest`. It returns the resolved model identifier from OpenRouter. Model selection, endpoint, identity, question map, and provider credential are never caller-controlled. The dedicated Senku OpenRouter key should have a provider-side spending limit; its configuration has not been verified here.
-
-The Worker remains stateless and uses one provider subrequest per evaluation. `/readyz` checks both machine tokens, distinctness, the trusted UTCP public origin, provider configuration, model alias, and timeout range without contacting OpenRouter. The first production deployment is health-checked, but readiness and authenticated live verification remain incomplete until the Worker secrets are configured; see [the Phase 2D deployment status](PHASE-2D-DEPLOYMENT.md). Soyuz's Service Binding client uses these same authenticated REST contracts.
+Profile identifiers and schema versions are part of the client contract. Add a new profile version when an incompatible input or output change is needed; keep existing versions available according to the project's compatibility policy. Regenerate and check the profile artifact whenever the registry changes.

@@ -111,7 +111,7 @@ export interface ProfileEvaluationMetadata {
   questionCount: number;
   evidenceBytes: number;
   providerDurationMs: number;
-  attemptCount: 1;
+  attemptCount: number;
   usage?: ProviderUsage;
 }
 

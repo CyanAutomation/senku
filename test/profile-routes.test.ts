@@ -4,10 +4,21 @@ import { LIMITS, type DecisionRequest } from "../src/contracts/decisions";
 import { makeTestEnvironment } from "./helpers/environment";
 import { createOpenRouterSimulator } from "./helpers/openrouter-simulator";
 import { providerResponse } from "./helpers/provider-response";
+import { profileEvaluationResponseSchema } from "../src/api/profile-contracts";
+import { profileRegistry } from "../src/decisions/profile-registry";
+import type { JsonSchema } from "../src/contracts/profiles";
 
 const env = makeTestEnvironment("profile-route");
 const KASEKI_TOKEN = env.SENKU_KASEKI_API_TOKEN!;
 const SOYUZ_TOKEN = env.SENKU_SOYUZ_API_TOKEN!;
+
+it("publishes an additive evaluation envelope and a positive attempt count", () => {
+  const rawSchema = profileEvaluationResponseSchema(profileRegistry.getProfile("task_admission_v1"));
+  expect(typeof rawSchema).toBe("object");
+  const schema = rawSchema as Exclude<JsonSchema, boolean>;
+  expect(schema.additionalProperties).toBe(true);
+  expect(schema.properties?.attemptCount).toMatchObject({ type: "integer", minimum: 1 });
+});
 
 function request(path: string, options: {
   method?: string;
@@ -15,17 +26,65 @@ function request(path: string, options: {
   body?: unknown;
   contentType?: string;
   clientIdentityHeader?: string;
+  correlationId?: string;
+  deadlineAtMs?: number;
 } = {}): Request {
   const headers = new Headers();
   if (options.token) headers.set("authorization", `Bearer ${options.token}`);
   if (options.contentType !== undefined) headers.set("content-type", options.contentType);
   if (options.clientIdentityHeader) headers.set("x-senku-client", options.clientIdentityHeader);
+  if (options.correlationId) headers.set("x-correlation-id", options.correlationId);
+  if (options.deadlineAtMs !== undefined) headers.set("x-senku-deadline-ms", String(options.deadlineAtMs));
   return new Request(`https://senku.test${path}`, {
     method: options.method ?? "GET",
     headers,
     body: options.body === undefined || options.method === "GET" ? undefined : JSON.stringify(options.body),
   });
 }
+
+it("applies admission controls before evaluation and reports bounded rate limits", async () => {
+  const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
+  const response = await createWorker({ fetchImpl, logger: () => undefined }).fetch(request(
+    "/v1/profiles/task_admission_v1/evaluate",
+    { method: "POST", token: KASEKI_TOKEN, body: { schemaVersion: "1", input: { repoUrl: "https://service.example.invalid/repo" } }, contentType: "application/json" },
+  ), {
+    ...env,
+    SENKU_RATE_LIMIT_IP: { limit: async () => ({ success: true }) },
+    SENKU_RATE_LIMIT_KASEKI: { limit: async () => ({ success: false }) },
+  });
+  expect(response.status).toBe(429);
+  expect(response.headers.get("retry-after")).toBe("60");
+  expect(await response.json()).toMatchObject({ error: { code: "RATE_LIMITED", retryable: true } });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+it("correlates caller logs and stops expired deadlines before provider inference", async () => {
+  const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
+  const logs: Array<Record<string, unknown>> = [];
+  const response = await createWorker({ fetchImpl, logger: (record) => logs.push(record as Record<string, unknown>) }).fetch(request(
+    "/v1/profiles/task_admission_v1/evaluate",
+    {
+      method: "POST", token: KASEKI_TOKEN,
+      body: { schemaVersion: "1", input: { repoUrl: "https://service.example.invalid/repo" } }, contentType: "application/json",
+      correlationId: "kaseki-request-42", deadlineAtMs: Date.now() - 1,
+    },
+  ), env);
+  expect(response.status).toBe(504);
+  expect(await response.json()).toMatchObject({ error: { code: "PROVIDER_TIMEOUT", retryable: true } });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(logs.at(-1)).toMatchObject({ correlationId: "kaseki-request-42", errorCode: "PROVIDER_TIMEOUT", attemptCount: 0 });
+});
+
+it("rejects malformed caller correlation IDs before identity or provider work", async () => {
+  const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
+  const response = await createWorker({ fetchImpl, logger: () => undefined }).fetch(new Request(
+    "https://service.example.invalid/v1/profiles/task_admission_v1/evaluate",
+    { method: "POST", headers: { "x-correlation-id": "x".repeat(129) }, body: "{}" },
+  ), env);
+  expect(response.status).toBe(400);
+  expect(await response.json()).toMatchObject({ error: { code: "INVALID_REQUEST" } });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
 
 const scenarios = [
   { id: "run_operations_triage_v1", token: SOYUZ_TOKEN, input: { run: {
@@ -39,7 +98,7 @@ const scenarios = [
     source: { status: "failed", failureClass: "validation_failure", exitCode: 1, changedFileCount: 2, summary: "The original checks failed." },
     retry: { status: "completed", failureClass: null, exitCode: 0, changedFileCount: 3, summary: "The retry passed the checks." },
   } } },
-  { id: "task_admission_v1", token: KASEKI_TOKEN, input: { repoUrl: "https://github.com/CyanAutomation/senku", taskPrompt: "Add the authenticated profile REST API." } },
+  { id: "task_admission_v1", token: KASEKI_TOKEN, input: { repoUrl: "https://code.example.invalid/org/repository", taskPrompt: "Add the authenticated profile REST API." } },
   { id: "kaseki_goal_check_v1", token: KASEKI_TOKEN, input: { state: { diff: "updated src/worker.ts" }, criteria: [{ id: "criterion_1", criterion: "The worker handles cancellation." }] } },
   { id: "kaseki_run_evaluation_v1", token: KASEKI_TOKEN, input: { state: { validation: "npm test passed" }, includeFailureDiagnosis: false } },
   { id: "kaseki_context_routing_v1", token: KASEKI_TOKEN, input: { mode: "tool_output", evidence: { phase: "coding", toolName: "bash", resultKind: "command_output", isError: false, characters: 1, bytes: 1, approximateTokens: 1, lineCount: 1, consecutiveDuplicateLineRatio: 0, hasReadRange: false } } },
@@ -178,7 +237,7 @@ const scenarios = [
   it("maps projected profile evidence over its profile cap to 413 before provider invocation", async () => {
     const fetchImpl = vi.fn(async () => providerResponse({} as DecisionRequest));
     const oversizedInput = {
-      repoUrl: "https://github.com/CyanAutomation/senku",
+      repoUrl: "https://code.example.invalid/org/repository",
       taskPrompt: "t".repeat(16_000),
       validationCommands: Array.from({ length: 32 }, () => "c".repeat(512)),
       changedFilesAllowlist: Array.from({ length: 64 }, () => "f".repeat(512)),
@@ -351,9 +410,9 @@ const scenarios = [
       }]).fetch,
       logger: (record) => retryAfterLogs.push(record as Record<string, unknown>),
     }).fetch(makeInput(), env);
-    expect(rateLimited.status).toBe(502);
+    expect(rateLimited.status).toBe(429);
     expect(rateLimited.headers.get("retry-after")).toBe("7");
-    expect(await rateLimited.json()).toMatchObject({ error: { code: "PROVIDER_UNAVAILABLE", retryable: true } });
+    expect(await rateLimited.json()).toMatchObject({ error: { code: "PROVIDER_RATE_LIMITED", retryable: true } });
     expect(retryAfterLogs.at(-1)).toMatchObject({ providerRetryAfterSeconds: 7, providerHttpStatus: 429 });
 
     const dateHint = new Date(Date.now() + 5_000).toUTCString();
@@ -364,7 +423,7 @@ const scenarios = [
       logger: () => undefined,
     }).fetch(makeInput(), env);
     const dateDelay = Number(dateRateLimit.headers.get("retry-after"));
-    expect(dateRateLimit.status).toBe(502);
+    expect(dateRateLimit.status).toBe(429);
     expect(Number.isInteger(dateDelay) && dateDelay >= 0 && dateDelay <= 5).toBe(true);
 
     const permanentFailure = await createWorker({

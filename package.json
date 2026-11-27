@@ -2,7 +2,7 @@
   "name": "senku",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed JEV decision service for Kaseki-Agent and Soyuz",
+  "description": "Typed JEV decision service for Kaseki-Agent, Soyuz, and Rusty-Fossil",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -16,6 +16,8 @@
     "test:coverage": "vitest run --coverage",
     "audit:dependencies": "node scripts/audit-dependencies.mjs",
     "validate:openapi": "vitest run --config vitest.openapi.config.ts",
+    "contracts:generate": "tsx scripts/generate-profile-contracts.ts",
+    "contracts:check": "vitest run test/profile-contract-artifact.test.ts",
     "validate:skills": "node --test scripts/skills.test.mjs",
     "perf:smoke": "vitest run --config vitest.performance.config.ts --reporter=verbose --maxWorkers=1",
     "smoke:provider": "vitest run --config vitest.provider-smoke.config.ts",
@@ -29,6 +31,7 @@
     "@utcp/sdk": "1.2.0",
     "@vitest/coverage-v8": "5.1.0",
     "fallow": "^3.47.0",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.162.0"

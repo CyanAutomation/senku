@@ -1,0 +1,39 @@
+name: Provider Canary
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: provider-canary
+  cancel-in-progress: false
+
+jobs:
+  canary:
+    if: vars.SENKU_CANARY_ENABLED == 'true' && vars.SENKU_CANARY_BUDGET_CAPPED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci
+      - name: Require a pinned expected model
+        run: test -n "$SENKU_CANARY_EXPECTED_MODEL"
+        env:
+          SENKU_CANARY_EXPECTED_MODEL: ${{ vars.SENKU_CANARY_EXPECTED_MODEL }}
+      - name: Run one synthetic provider request
+        run: npm run smoke:provider
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.SENKU_CANARY_OPENROUTER_API_KEY }}
+          JEV_MODEL: ${{ vars.SENKU_CANARY_MODEL || '~typesafe/jev-latest' }}
+          SENKU_CANARY_EXPECTED_MODEL: ${{ vars.SENKU_CANARY_EXPECTED_MODEL }}
+          SENKU_PROVIDER_TIMEOUT_MS: "15000"
