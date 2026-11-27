@@ -1,5 +1,7 @@
 # Phase 2B implementation decisions
 
+> Historical scope record: this document records the original Phase 2B implementation. Current behavior has since added a Rusty-Fossil identity, dual-token rotation, bounded provider retry, deadline/correlation headers, admission control, and a per-isolate circuit breaker. Use [Resilience and operations](RESILIENCE-OPERATIONS.md) and [the API contract](CONTRACT.md) for current behavior.
+
 ## Scope
 
 Phase 2B exposes the five Phase 2A profiles through authenticated REST, adds independent Kaseki and Soyuz machine identities, publishes permission-filtered profile discovery and OpenAPI 3.1, hardens validation-recovery redaction, and documents consumer compatibility findings. It preserves `POST /v1/decisions`, `/healthz`, and `/readyz`.

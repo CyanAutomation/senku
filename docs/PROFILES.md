@@ -93,7 +93,7 @@ Redaction follows Kaseki's `redactJevEvidence()` patterns for private keys, bear
 
 ## Output and confidence
 
-Every successful profile response has the same top-level fields: `schemaVersion`, `requestId`, `status`, `profileId`, `profileVersion`, `provider`, `model`, `answers`, `result`, optional `usage`, `durationMs`, and `attemptCount`. `result` is the profile's canonical answer map and duplicates `answers` for compatibility. Resolved model is the provider-returned model ID, not the configured alias.
+Every successful profile response has the same required top-level fields: `schemaVersion`, `requestId`, `status`, `profileId`, `profileVersion`, `provider`, `model`, `answers`, `result`, `durationMs`, and `attemptCount`; `usage` is optional. `result` is the profile's canonical answer map and duplicates `answers` for compatibility. Resolved model is the provider-returned model ID, not the configured alias. Clients should ignore unknown top-level fields and accept any positive integer `attemptCount`. The nested answer objects and answer IDs remain strict to the selected profile contract.
 
 Canonical NouL answers include `noul`, deterministic `true`/`false` probabilities, and `confidence: null`. Choice and score answers carry exact probability maps, validated labels/scales, and numeric or nullable confidence. The public JSON Schemas preserve `null` rather than manufacturing a value.
 

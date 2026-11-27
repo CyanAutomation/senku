@@ -14,14 +14,14 @@ For GitHub Actions triggers, permissions, action pins, or environment protection
 - `npm run build` invokes Wrangler's dry-run build; it does not deploy. `npm run deploy` and `wrangler secret put` change the remote Worker. Treat secret writes as deployments.
 - Routine local checks and CI do not need Cloudflare credentials or an OpenRouter key. Never ask for secret values in chat or place them in source, Wrangler `vars`, shell arguments, or logs.
 - Production deploys run from a successful push to `main` through the `cloudflare` GitHub Environment. Preserve its environment protection, pinned Actions, and least-privilege permissions when editing workflows.
-- Cloudflare deployment credentials authorize deployment; they do not set the Worker runtime secrets. The three runtime secrets are configured directly on the Worker.
+- Cloudflare deployment credentials authorize deployment; they do not set Worker runtime secrets. Kaseki and Soyuz machine tokens are required, Rusty-Fossil is optional, and provider authorization is configured separately.
 - `/healthz` proves liveness only. Production readiness and authenticated profile/UTCP checks are distinct gates. Do not report production as ready until documented secret configuration and verification are complete.
-- No custom CPU or subrequest limits are configured because the current Free plan rejected them. Local elapsed time is not billed production CPU measurement.
+- The repository does not configure custom CPU or subrequest limits. Do not infer the live account plan from this checkout; local elapsed time is not billed production CPU measurement.
 
 ## Change procedure
 
 1. Inspect the local Wrangler version, package scripts, compatibility date, variables, observability, and deployment workflow. Use the installed CLI/schema and current Cloudflare documentation for version-sensitive command or configuration claims; do not invent flags.
-2. Make the smallest config or workflow change. Preserve the current fixed model alias, bounded timeout, trusted public UTCP origin, no-storage architecture, and secret separation unless the task explicitly changes those contracts.
+2. Make the smallest config or workflow change. Preserve the allowlisted model set, bounded timeout, trusted public UTCP origin, no-storage architecture, and secret separation unless the task explicitly changes those contracts.
 3. For runtime/config behavior, add a focused regression test first where practical, then implement. Update the deployment and operations docs when a gate, secret, command, or operator action changes.
 4. Before any remote command, verify the requested target account and Worker. A dry run or local test does not establish remote readiness.
 

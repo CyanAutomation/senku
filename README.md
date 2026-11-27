@@ -17,7 +17,7 @@ Configure the API origin for each environment through deployment settings. Clien
 
 ## Profiles and access
 
-Senku owns the JEV questions and schemas for its supported profiles. Each consumer receives only the profile access configured for its service identity. See [docs/PROFILES.md](docs/PROFILES.md) for the profile contracts and [docs/CONTRACT.md](docs/CONTRACT.md) for request and response shapes.
+Senku owns the JEV questions and schemas for its supported profiles. Each consumer receives only the profile access configured for its service identity. Kaseki and Soyuz credentials are required for readiness; Rusty-Fossil has an independent optional identity and credential. See [docs/PROFILES.md](docs/PROFILES.md) for the profile contracts and [docs/CONTRACT.md](docs/CONTRACT.md) for request and response shapes.
 
 The response format is additive: clients should validate the fields they depend on and ignore unknown top-level fields. Provider output is validated against the selected profile before it is returned.
 
@@ -31,6 +31,7 @@ The response format is additive: clients should validate the fields they depend 
 - Telemetry should contain operational metadata only. Do not log prompts, evidence, answers, credentials, or provider request bodies.
 
 These controls do not replace environment-specific quota, billing, or consumer-routing checks. Use [docs/PHASE-2D-DEPLOYMENT.md](docs/PHASE-2D-DEPLOYMENT.md) as a generic release checklist.
+See [docs/RESILIENCE-OPERATIONS.md](docs/RESILIENCE-OPERATIONS.md) for the current deadline, retry, circuit-breaker, rate-limit, identity-rotation, canary, and ingress behavior.
 
 ## Local development
 
@@ -42,6 +43,7 @@ The routine test suite mocks the provider. The optional live-provider smoke test
 
 - [Contract](docs/CONTRACT.md)
 - [Profiles](docs/PROFILES.md)
+- [Resilience and operations](docs/RESILIENCE-OPERATIONS.md)
 - [Development](docs/DEVELOPMENT.md)
 - [Generic deployment checklist](docs/PHASE-2D-DEPLOYMENT.md)
 
