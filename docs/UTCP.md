@@ -50,7 +50,7 @@ Configure the manual request with a client-side bearer variable. Each discovered
 
 The operator supplies the Kaseki or Soyuz token to the local UTCP client. The manual contains only the variable placeholder. It never includes either configured machine secret or `OPENROUTER_API_KEY`; the provider key is not sent to the client. The same identity must be used for discovery and invocation.
 
-The advertised invocation origin comes from the trusted `SENKU_PUBLIC_BASE_URL` configuration. Production origins must use HTTPS. HTTP is permitted only for loopback hosts in local development. Credentials, query strings, fragments, and non-root paths are rejected. Senku never derives tool URLs from `Host` or `X-Forwarded-Host`; an invalid or missing origin fails closed. Set the production origin in Worker configuration and use the local override in `.dev.vars`.
+The advertised invocation origin comes from the trusted `SENKU_PUBLIC_BASE_URL` configuration. Production origins must use HTTPS. HTTP is permitted only for loopback hosts in local development. Credentials, query strings, fragments, and non-root paths are rejected. Senku never derives tool URLs from `Host` or `X-Forwarded-Host`; an invalid or missing origin fails closed for UTCP manual generation. This setting is not part of `/readyz`, which checks evaluation configuration and admission-control bindings. Set the production origin in Worker configuration and use the local override in `.dev.vars`.
 
 ## Official TypeScript client example
 

@@ -1,5 +1,7 @@
 # Phase 2C implementation decisions
 
+> Historical scope record: current behavior has since changed. `/readyz` does not depend on `SENKU_PUBLIC_BASE_URL`; provider evaluation may make one bounded retry after a qualifying 429; and Rusty-Fossil is now an optional identity. See [Resilience and operations](RESILIENCE-OPERATIONS.md) for current operational behavior.
+
 ## Scope and versions
 
 Phase 2C adds authenticated, identity-filtered UTCP discovery for Senku's five existing profile REST routes, confirms real client invocation, and completes independent OpenAPI validation and discovery performance measurements. It does not change the profile engine, add an inference endpoint, modify Soyuz or Kaseki-Agent, deploy the Worker, or add persistence.

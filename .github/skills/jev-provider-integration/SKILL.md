@@ -9,8 +9,8 @@ Read the provider and API contracts in [CONTRACT.md](../../../docs/CONTRACT.md),
 
 ## Provider invariants
 
-- Use the fixed OpenRouter Decisions endpoint and the sole supported alias `~typesafe/jev-latest`. Do not accept a caller-selected URL, model, provider credential, retry count, or fallback.
-- Make at most one provider attempt per evaluation. Preserve configured timeout bounds, the streamed 64 KiB response limit, request/evidence/question limits, and fail-closed configuration behavior.
+- Use the fixed deployment-configured OpenRouter Decisions endpoint and an allowlisted model. Do not accept a caller-selected URL, model, provider credential, retry count, or fallback.
+- Make at most two provider attempts per evaluation: a single retry for an initial HTTP 429 only when bounded `Retry-After` is at most two seconds and the provider deadline leaves at least one second for another attempt. Do not retry transport failures, timeouts, 408, 425, 5xx, or invalid responses. Preserve configured timeout bounds, the streamed 64 KiB response limit, request/evidence/question limits, and fail-closed configuration behavior.
 - Validate the full provider answer set, answer types, choices, probability distributions, score ranges, and profile-specific output before returning success.
 - Keep errors safe and classified. Never log or return credentials, evidence, prompts, raw provider responses, or stack traces. Preserve null confidence instead of estimating it.
 - Profile projections must remain bounded and minimize caller evidence. Redact before truncating sensitive output tails where the profile contract requires it; explain that deterministic redaction patterns are incomplete.
@@ -20,7 +20,7 @@ Read the provider and API contracts in [CONTRACT.md](../../../docs/CONTRACT.md),
 
 1. Trace request construction, configuration resolution, fetch/timeout handling, bounded response reading, response validation, and profile output validation.
 2. Add focused tests before changing behavior. Cover valid responses, malformed or oversized bodies, wrong answer sets/types, timeout and transport failures, invalid configuration, and proof that rejected inputs do not call the provider where applicable.
-3. Implement the narrowest change while preserving one-attempt semantics and safe diagnostics. Update the API/profile documentation when externally visible behavior changes.
+3. Implement the narrowest change while preserving the bounded retry policy and safe diagnostics. Update the API/profile documentation when externally visible behavior changes.
 4. Keep live provider smoke testing separate. It makes one paid inference request and is not part of routine CI.
 
 ## Validate

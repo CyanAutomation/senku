@@ -1,5 +1,7 @@
 # Phase 1 implementation decisions
 
+> Historical scope record: current provider configuration now permits a fixed allowlisted model in addition to the original JEV alias, and a bounded 429 retry may produce two provider attempts. See [Resilience and operations](RESILIENCE-OPERATIONS.md) for current behavior.
+
 ## Consumer contract reconciliation
 
 Senku accepts Kaseki's structured object state as well as Soyuz's string state. Its question content supports Kaseki's string, object, and array values, including null choice descriptions. NouL criteria are optional and may contain either binary side. This is broader than Soyuz's current text-only question shape.
