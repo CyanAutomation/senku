@@ -3,7 +3,9 @@ import { LIMITS, SCHEMA_VERSION, type DecisionRequest, type Environment } from "
 import { ProfileEngineError, type AnyDecisionProfile, type ProfileEvaluation } from "../contracts/profiles";
 import { validateJsonSchema } from "../contracts/json-schema-validation";
 import { validateDecisionRequest } from "../contracts/validation";
-import { ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../providers/openrouter/decisions";
+import { MAX_PROVIDER_TIMEOUT_MS, MIN_PROVIDER_TIMEOUT_MS, ProviderError, requestOpenRouterDecision, resolveProviderConfig, type ProviderConfig } from "../providers/openrouter/decisions";
+import { remainingProviderBudgetMs } from "../http/deadline";
+import type { BestEffortCircuitBreaker } from "../providers/openrouter/circuit-breaker";
 import { profileRegistry, type ProfileOutputFor, type RegisteredProfileId } from "./profile-registry";
 
 export interface ProfileEvaluationContext {
@@ -14,6 +16,8 @@ export interface ProfileEngineDependencies {
   env: Environment;
   fetchImpl?: typeof fetch;
   requestDecision?: typeof requestOpenRouterDecision;
+  deadlineAtMs?: number;
+  providerCircuitBreaker?: BestEffortCircuitBreaker;
 }
 
 interface PreparedProfileRequest {
@@ -75,11 +79,14 @@ async function requestProviderDecision(
   dependencies: ProfileEngineDependencies,
 ): Promise<Awaited<ReturnType<typeof requestOpenRouterDecision>>> {
   try {
-    return await (dependencies.requestDecision ?? requestOpenRouterDecision)(
+    const operation = () => (dependencies.requestDecision ?? requestOpenRouterDecision)(
       request,
       config,
       dependencies.fetchImpl,
     );
+    return await (dependencies.providerCircuitBreaker
+      ? dependencies.providerCircuitBreaker.execute(operation)
+      : operation());
   } catch (error) {
     if (error instanceof ProviderError) throw error;
     throw new ProviderError("PROVIDER_UNAVAILABLE", true);
@@ -102,9 +109,20 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
   const prepared = prepareProfileRequest(profile, validatedInput);
   const config = resolveProviderConfig(dependencies.env);
   if (!config.ok) throw new ProfileEngineError("NOT_CONFIGURED");
+  const timeoutMs = remainingProviderBudgetMs(
+    dependencies.deadlineAtMs,
+    config.timeoutMs,
+  );
+  if (!Number.isFinite(timeoutMs) || timeoutMs < MIN_PROVIDER_TIMEOUT_MS) {
+    throw new ProviderError("PROVIDER_TIMEOUT", true, { attemptCount: 0 });
+  }
+  const boundedConfig = {
+    ...config,
+    timeoutMs: Math.min(MAX_PROVIDER_TIMEOUT_MS, timeoutMs),
+  };
 
   const started = performance.now();
-  const providerResult = await requestProviderDecision(prepared.request, config, dependencies);
+  const providerResult = await requestProviderDecision(prepared.request, boundedConfig, dependencies);
   const durationMs = Math.max(0, Math.round(performance.now() - started));
   const result = profile.validateOutput(providerResult.answers, validatedInput);
   return {
@@ -122,7 +140,7 @@ export async function evaluateProfile<Id extends RegisteredProfileId>(
       questionCount: prepared.questionCount,
       evidenceBytes: prepared.evidenceBytes,
       providerDurationMs: durationMs,
-      attemptCount: 1,
+      attemptCount: providerResult.attemptCount,
       ...(providerResult.usage ? { usage: providerResult.usage } : {}),
     },
   };

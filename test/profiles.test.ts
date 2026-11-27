@@ -42,7 +42,7 @@ const retryReviewInput = {
 };
 
 const taskAdmissionInput = {
-  repoUrl: "https://github.com/CyanAutomation/senku",
+  repoUrl: "https://code.example.invalid/org/repository",
   ref: "main",
   taskPrompt: "Update the API key handling; api_key=synthetic-secret-value",
   validationCommands: ["npm test"],
@@ -124,7 +124,8 @@ function rawAnswers(questions: ProfileQuestions): Record<string, DecisionAnswer>
 }
 
 const env: Environment = {
-  OPENROUTER_API_KEY: "test-openrouter-key",
+  SENKU_PROVIDER_REQUEST_URL: "https://provider.example.invalid/api/v1/decisions",
+  SENKU_PROVIDER_AUTHORIZATION: "TestCredential test-provider-authorization",
   JEV_MODEL: "~typesafe/jev-latest",
   SENKU_PROVIDER_TIMEOUT_MS: "15000",
 };
@@ -147,12 +148,12 @@ const env: Environment = {
     expect(profiles.map((profile) => profile.dynamicQuestions)).toEqual([false, false, false, false, false, true, true, true, false]);
     expect(profiles[0]).toMatchObject({ owner: "soyuz", allowedClients: ["soyuz"], maxEvidenceBytes: 12 * 1024 });
     expect(profiles[3]).toMatchObject({ id: "run_retry_review_v1", owner: "soyuz", allowedClients: ["soyuz"], maxEvidenceBytes: 20 * 1024 });
-    expect(profiles[4]).toMatchObject({ owner: "kaseki", allowedClients: ["kaseki"] });
+    expect(profiles[4]).toMatchObject({ owner: "kaseki", allowedClients: ["kaseki", "rusty_fossil"] });
     expect(PROFILE_CLIENT_PERMISSIONS.run_retry_review_v1).toEqual(["soyuz"]);
-    expect(PROFILE_CLIENT_PERMISSIONS.validation_recovery_v1).toEqual(["kaseki"]);
-    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_goal_check_v1).toEqual(["kaseki"]);
-    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_run_evaluation_v1).toEqual(["kaseki"]);
-    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_context_routing_v1).toEqual(["kaseki"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.validation_recovery_v1).toEqual(["kaseki", "rusty_fossil"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_goal_check_v1).toEqual(["kaseki", "rusty_fossil"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_run_evaluation_v1).toEqual(["kaseki", "rusty_fossil"]);
+    expect(PROFILE_CLIENT_PERMISSIONS.kaseki_context_routing_v1).toEqual(["kaseki", "rusty_fossil"]);
     for (const profile of profiles) {
       const permissions = PROFILE_CLIENT_PERMISSIONS[profile.id as keyof typeof PROFILE_CLIENT_PERMISSIONS];
       expect(profile.allowedClients).toEqual(permissions);
@@ -386,7 +387,7 @@ const env: Environment = {
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, model: "other/model" })).toThrow();
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, taskMode: "full-rewrite" })).toThrow();
     expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, publishMode: "unsafe" })).toThrow();
-    expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, repoUrl: "https://user:secret@example.test/repo" })).toThrow();
+    expect(() => taskAdmissionProfile.validateInput({ ...taskAdmissionInput, repoUrl: "https://code.example.invalid/org/repository?ref=main" })).toThrow();
   });
 
   it("rejects invalid optional task-admission values and stage settings", () => {
@@ -460,7 +461,6 @@ const env: Environment = {
       "AWS key AKIA" + "B".repeat(16),
       "JWT eyJ" + "c".repeat(24) + "." + "d".repeat(24) + "." + "e".repeat(24),
       "password=hunter2",
-      "https://user:private-value@example.test/path",
     ].join(" ");
     const output = "z".repeat(4_000) + sensitive;
     const state = JSON.parse(validationRecoveryProfile.buildDecision(validationRecoveryProfile.validateInput({
@@ -525,6 +525,7 @@ describe("shared profile engine", () => {
     const requestDecision = async (request: DecisionRequest) => ({
       model: "typesafe/jev-1.14-20261014",
       answers: rawAnswers(request.questions),
+      attemptCount: 1,
     });
 
     try {

@@ -36,17 +36,18 @@ function commonErrors(statuses: readonly number[]): Record<string, unknown> {
     405: "The HTTP method is not supported for this route.",
     413: "The request or evidence exceeds its configured byte limit.",
     415: "The request body must use application/json.",
+    429: "The service or its provider is rate limiting requests.",
     500: "The service encountered an unexpected internal error.",
     502: "The provider is unavailable or returned an invalid result.",
-    503: "The service is not configured.",
+    503: "The service is not configured or admission control is unavailable.",
     504: "The provider did not respond before the configured timeout.",
   };
   return Object.fromEntries(statuses.map((status) => {
     const errorResponse = response(ref("ErrorResponse"), descriptions[status]);
-    if (status === 502) {
+    if (status === 429 || status === 502) {
       errorResponse.headers = {
         "Retry-After": {
-          description: "Optional bounded upstream delay in seconds for a retryable provider failure. Senku does not retry automatically.",
+          description: "Optional bounded delay in seconds. A provider 429 may be retried once by Senku when the delay fits within the caller deadline; all other retries are the caller's decision.",
           schema: { type: "integer", minimum: 0, maximum: MAX_RETRY_AFTER_SECONDS },
         },
       };
@@ -129,6 +130,21 @@ function profileIdsParameter(ids: string[]): Record<string, unknown> {
   return { name: "profileId", in: "path", required: true, schema: { type: "string", enum: ids } };
 }
 
+function evaluationHeaderParameters(): Record<string, unknown>[] {
+  return [
+    {
+      name: "X-Correlation-Id", in: "header", required: false,
+      description: "Optional identifier recorded in Senku's structured logs; 1–128 safe ASCII characters.",
+      schema: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$" },
+    },
+    {
+      name: "X-Senku-Deadline-Ms", in: "header", required: false,
+      description: "Optional absolute Unix deadline in milliseconds. Provider work is bounded by the lesser of this remaining budget and Senku's configured timeout.",
+      schema: { type: "string", pattern: "^[0-9]{13}$" },
+    },
+  ];
+}
+
 function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown> {
   const publicProfiles = listPublicProfiles(identity);
   const profiles = publicProfiles.map(({ id }) => profileRegistry.getProfile(id));
@@ -187,11 +203,11 @@ function createOpenApiDocument(identity: ClientIdentity): Record<string, unknown
     "/v1/profiles/{profileId}/evaluate": {
       post: {
         operationId: "evaluateProfile", summary: "Evaluate bounded evidence using a permitted profile", security: [{ BearerAuth: [] }],
-        parameters: [profileIdsParameter(profileIds)],
+        parameters: [profileIdsParameter(profileIds), ...evaluationHeaderParameters()],
         requestBody: { required: true, content: { "application/json": { schema: { oneOf: profileRequestRefs } } } },
         responses: {
           "200": response({ oneOf: profileResponseRefs }, "Stable version 1 profile evaluation response."),
-          ...commonErrors([400, 401, 403, 405, 413, 415, 500, 502, 503, 504]),
+          ...commonErrors([400, 401, 403, 405, 413, 415, 429, 500, 502, 503, 504]),
         },
       },
     },

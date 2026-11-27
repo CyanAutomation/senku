@@ -20,7 +20,7 @@ export interface SimulatedOpenRouterCall {
   body: unknown;
 }
 
-const OPENROUTER_URL = "https://openrouter.ai/api/alpha/decisions";
+const PROVIDER_URL = "https://provider.example.invalid/api/v1/decisions";
 
 function abortError(signal: AbortSignal): unknown {
   return signal.reason ?? new Error("simulated_request_aborted");
@@ -102,7 +102,7 @@ export function createOpenRouterSimulator(initialScenarios: readonly OpenRouterS
 
   const fetch: typeof globalThis.fetch = async (input, init) => {
     const request = input instanceof Request ? input.clone() : new Request(input, init);
-    if (request.url !== OPENROUTER_URL) {
+    if (request.url !== PROVIDER_URL) {
       throw new Error("simulator_blocked_unexpected_outbound_request");
     }
 

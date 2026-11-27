@@ -133,7 +133,7 @@ async function benchmarkDiscovery(worker: ReturnType<typeof createWorker>): Prom
 
 function profileScenarios(): ProfileScenario[] {
   const maxTaskAdmissionInput = {
-    repoUrl: "https://github.com/CyanAutomation/senku",
+    repoUrl: "https://code.example.invalid/org/repository",
     ref: "r".repeat(256),
     taskPrompt: "t".repeat(9_000),
     validationCommands: Array.from({ length: 14 }, () => "c".repeat(450)),

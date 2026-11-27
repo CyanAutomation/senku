@@ -2,7 +2,7 @@
 
 The profile engine exposes eight server-owned, versioned contracts through `POST /v1/profiles/{profileId}/evaluate`. Callers send evidence inside `{ "schemaVersion": "1", "input": ... }`; Senku constructs the JEV questions and keeps provider calls, validation, and permissions centralized. `GET /v1/profiles` discovers only permitted profiles. `GET /v1/profiles/{profileId}` returns the permitted profile's machine-readable input/output schemas and limits. The authenticated `/openapi.json` document uses the same schemas.
 
-Profiles never accept caller-supplied question definitions, provider URLs, or model names. The goal-check profile accepts bounded success criteria as evidence and Senku constructs the corresponding questions. No profile result authorises a task, retry, code change, publication, queue transition, or other side effect. Kaseki and Soyuz continue to enforce their own deterministic policies.
+Profiles never accept caller-supplied question definitions, provider URLs, or model names. The goal-check profile accepts bounded success criteria as evidence and Senku constructs the corresponding questions. No profile result authorises a task, retry, code change, publication, queue transition, or other side effect. Kaseki, Soyuz, and Rusty-Fossil continue to enforce their own deterministic policies.
 
 ## Profiles and limits
 

@@ -201,7 +201,7 @@ export function profileEvaluationResponseSchema(
   return {
     type: "object",
     required: ["schemaVersion", "requestId", "status", "profileId", "profileVersion", "provider", "model", "answers", "result", "durationMs", "attemptCount"],
-    additionalProperties: false,
+    additionalProperties: true,
     properties: {
       schemaVersion: { type: "string", const: SCHEMA_VERSION },
       requestId: { type: "string", pattern: "^dec-" },
@@ -223,7 +223,7 @@ export function profileEvaluationResponseSchema(
         },
       },
       durationMs: { type: "integer", minimum: 0 },
-      attemptCount: { type: "integer", const: 1 },
+      attemptCount: { type: "integer", minimum: 1 },
     },
   };
 }

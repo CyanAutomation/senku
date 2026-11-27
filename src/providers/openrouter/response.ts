@@ -168,22 +168,22 @@ export function validateProviderPayload(value: unknown, request: DecisionRequest
   usage?: ProviderUsage;
 } {
   if (!isRecord(value) || !isRecord(value.answers)) {
-    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_envelope_invalid");
+    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_envelope_invalid" });
   }
   if (typeof value.model !== "string" || value.model.trim().length === 0 || value.model.length > 200) {
-    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_model_invalid");
+    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_model_invalid" });
   }
 
   const expectedKeys = Object.keys(request.questions);
   const answerKeys = Object.keys(value.answers);
   if (expectedKeys.length !== answerKeys.length
     || !expectedKeys.every((key) => Object.hasOwn(value.answers as object, key))) {
-    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_set_mismatch");
+    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_answer_set_mismatch" });
   }
   const answers: Record<string, DecisionAnswer> = Object.create(null) as Record<string, DecisionAnswer>;
   for (const key of expectedKeys) {
     const answer = validateAnswer(value.answers[key], request.questions[key]);
-    if (!answer) throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_answer_invalid");
+    if (!answer) throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_answer_invalid" });
     answers[key] = answer;
   }
 
@@ -192,7 +192,7 @@ export function validateProviderPayload(value: unknown, request: DecisionRequest
 }
 
 export async function readBoundedResponse(response: Response): Promise<unknown> {
-  if (!response.body) throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_body_missing");
+  if (!response.body) throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_body_missing" });
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let totalBytes = 0;
@@ -203,13 +203,13 @@ export async function readBoundedResponse(response: Response): Promise<unknown> 
       totalBytes += item.value.byteLength;
       if (totalBytes > LIMITS.providerResponseBytes) {
         await reader.cancel().catch(() => undefined);
-        throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_body_too_large");
+        throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_body_too_large" });
       }
       chunks.push(item.value);
     }
   } catch (error) {
     if (error instanceof ProviderError) throw error;
-    throw new ProviderError("PROVIDER_UNAVAILABLE", true, "response_body_read_failed");
+    throw new ProviderError("PROVIDER_UNAVAILABLE", true, { diagnosticCode: "response_body_read_failed" });
   } finally {
     reader.releaseLock();
   }
@@ -223,6 +223,6 @@ export async function readBoundedResponse(response: Response): Promise<unknown> 
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as unknown;
   } catch {
-    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, "response_body_invalid_json");
+    throw new ProviderError("INVALID_PROVIDER_RESPONSE", false, { diagnosticCode: "response_body_invalid_json" });
   }
 }
